@@ -1,0 +1,983 @@
+import React, { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { getFirestore, collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { app } from '../firebase-config';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  IconButton,
+  Typography,
+  Box,
+  Snackbar,
+  Alert,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  Checkbox,
+  ListItemText,
+} from '@mui/material';
+import { Edit as EditIcon, Delete as DeleteIcon, Add as AddIcon, FileDownload as FileDownloadIcon } from '@mui/icons-material';
+import Papa from 'papaparse';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+
+function C({ colletionsData }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const queryParams = new URLSearchParams(location.search);
+  const collectionName = queryParams.get('collection');
+  const [data, setData] = useState(colletionsData[collectionName] || []); // Local state for data
+
+  const [editingItem, setEditingItem] = useState(null);
+  const [newItem, setNewItem] = useState({});
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+
+  // Download options state
+  const [selectedColumns, setSelectedColumns] = useState([]);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [isDownloadDialogOpen, setIsDownloadDialogOpen] = useState(false);
+
+  const db = getFirestore(app);
+
+  // Get fields excluding 'id'
+  const fields = data.length > 0 ? Object.keys(data[0]).filter((key) => key !== 'id') : [];
+
+  const showSnackbar = (message, severity = 'success') => {
+    setSnackbar({ open: true, message, severity });
+  };
+
+  const handleAdd = async () => {
+    try {
+      const collectionRef = collection(db, collectionName);
+      const docRef = await addDoc(collectionRef, newItem);
+      setData([...data, { id: docRef.id, ...newItem }]); // Update local state
+      setIsAddDialogOpen(false);
+      setNewItem({});
+      showSnackbar('Item added successfully');
+    } catch (error) {
+      showSnackbar('Error adding item', 'error');
+      console.error('Error adding document: ', error);
+    }
+  };
+
+  const handleUpdate = async () => {
+    try {
+      const docRef = doc(db, collectionName, editingItem.id);
+      const updateData = { ...editingItem };
+      delete updateData.id;
+      await updateDoc(docRef, updateData);
+      setData(data.map((item) => (item.id === editingItem.id ? { ...editingItem } : item))); // Update local state
+      setIsEditDialogOpen(false);
+      setEditingItem(null);
+      showSnackbar('Item updated successfully');
+    } catch (error) {
+      showSnackbar('Error updating item', 'error');
+      console.error('Error updating document: ', error);
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      const docRef = doc(db, collectionName, selectedId);
+      await deleteDoc(docRef);
+      setData(data.filter((item) => item.id !== selectedId)); // Update local state
+      setIsDeleteDialogOpen(false);
+      showSnackbar('Item deleted successfully');
+    } catch (error) {
+      showSnackbar('Error deleting item', 'error');
+      console.error('Error deleting document: ', error);
+    }
+  };
+
+  // Download as CSV
+  const downloadCSV = () => {
+    const filteredData = filterData(data);
+    const csv = Papa.unparse(filteredData);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${collectionName}_${new Date().toISOString()}.csv`;
+    link.click();
+    showSnackbar('CSV downloaded successfully');
+  };
+
+  // Download as PDF
+  const downloadPDF = () => {
+    const filteredData = filterData(data);
+    const doc = new jsPDF();
+    doc.autoTable({
+      head: [selectedColumns.map((col) => col.charAt(0).toUpperCase() + col.slice(1))],
+      body: filteredData.map((row) => selectedColumns.map((col) => row[col])),
+    });
+    doc.save(`${collectionName}_${new Date().toISOString()}.pdf`);
+    showSnackbar('PDF downloaded successfully');
+  };
+
+  // Filter data based on selected columns and date range
+  const filterData = (data) => {
+    let filtered = data;
+
+    // Filter by date range if applicable
+    if (startDate && endDate) {
+      filtered = filtered.filter(
+        (item) => item.date >= startDate && item.date <= endDate
+      );
+    }
+
+    // Filter by selected columns
+    if (selectedColumns.length > 0) {
+      filtered = filtered.map((item) => {
+        const newItem = {};
+        selectedColumns.forEach((col) => {
+          newItem[col] = item[col];
+        });
+        return newItem;
+      });
+    }
+
+    return filtered;
+  };
+
+  return (
+    <Box sx={{ p: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" component="h1">
+          {collectionName?.charAt(0).toUpperCase() + collectionName?.slice(1)}
+        </Typography>
+        <Box>
+          <Button
+            variant="contained"
+            startIcon={<FileDownloadIcon />}
+            onClick={() => setIsDownloadDialogOpen(true)}
+            sx={{ mr: 2 }}
+          >
+            Download
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setIsAddDialogOpen(true)}
+          >
+            Add New Item
+          </Button>
+        </Box>
+      </Box>
+
+      {/* Scrollable Table Container */}
+      <Box sx={{ overflow: 'auto' }}>
+        <TableContainer component={Paper} elevation={3}>
+          <Table sx={{ minWidth: 650 }} size="small" aria-label="a dense table">
+            <TableHead>
+              <TableRow>
+                {fields.map((field) => (
+                  <TableCell
+                    key={field}
+                    sx={{ fontWeight: 'bold', position: 'sticky', top: 0, bgcolor: 'background.paper' }}
+                  >
+                    {field.charAt(0).toUpperCase() + field.slice(1)}
+                  </TableCell>
+                ))}
+                <TableCell align="right" sx={{ position: 'sticky', top: 0, bgcolor: 'background.paper' }}>
+                  Actions
+                </TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {data.length > 0 ? (
+                data.map((item) => (
+                  <TableRow key={item.id} hover>
+                    {fields.map((field) => (
+                      <TableCell key={field}>{item[field]}</TableCell>
+                    ))}
+                    <TableCell align="right">
+                      <IconButton
+                        color="primary"
+                        onClick={() => {
+                          setEditingItem(item);
+                          setIsEditDialogOpen(true);
+                        }}
+                      >
+                        <EditIcon />
+                      </IconButton>
+                      <IconButton
+                        color="error"
+                        onClick={() => {
+                          setSelectedId(item.id);
+                          setIsDeleteDialogOpen(true);
+                        }}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={fields.length + 1} align="center">
+                    <Typography
+                      className="cursor-pointer"
+                      onClick={() => {
+                        navigate('/Main');
+                      }}
+                    >
+                      No data available. Click here to redirect to Main.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+
+      {/* Download Dialog */}
+      <Dialog open={isDownloadDialogOpen} onClose={() => setIsDownloadDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Download Options</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel>Select Columns</InputLabel>
+              <Select
+                multiple
+                value={selectedColumns}
+                onChange={(e) => setSelectedColumns(e.target.value)}
+                renderValue={(selected) => selected.join(', ')}
+              >
+                {fields.map((field) => (
+                  <MenuItem key={field} value={field}>
+                    <Checkbox checked={selectedColumns.includes(field)} />
+                    <ListItemText primary={field} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              label="Start Date"
+              type="date"
+              fullWidth
+              margin="normal"
+              InputLabelProps={{ shrink: true }}
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+            <TextField
+              label="End Date"
+              type="date"
+              fullWidth
+              margin="normal"
+              InputLabelProps={{ shrink: true }}
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsDownloadDialogOpen(false)}>Cancel</Button>
+          <Button onClick={downloadCSV} variant="contained" color="primary">
+            Download CSV
+          </Button>
+          <Button onClick={downloadPDF} variant="contained" color="secondary">
+            Download PDF
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Dialog */}
+      <Dialog open={isAddDialogOpen} onClose={() => setIsAddDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add New Item</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {fields.map((field) => (
+              <TextField
+                key={field}
+                label={field.charAt(0).toUpperCase() + field.slice(1)}
+                fullWidth
+                margin="normal"
+                value={newItem[field] || ''}
+                onChange={(e) =>
+                  setNewItem((prev) => ({
+                    ...prev,
+                    [field]: e.target.value,
+                  }))
+                }
+              />
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleAdd} variant="contained">
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={isEditDialogOpen} onClose={() => setIsEditDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Item</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {editingItem &&
+              fields.map((field) => (
+                <TextField
+                  key={field}
+                  label={field.charAt(0).toUpperCase() + field.slice(1)}
+                  fullWidth
+                  margin="normal"
+                  value={editingItem[field] || ''}
+                  onChange={(e) =>
+                    setEditingItem((prev) => ({
+                      ...prev,
+                      [field]: e.target.value,
+                    }))
+                  }
+                />
+              ))}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleUpdate} variant="contained">
+            Update
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onClose={() => setIsDeleteDialogOpen(false)}>
+        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogContent>
+          <Typography>Are you sure you want to delete this item?</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleDelete} color="error" variant="contained">
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+       >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>           
+
+    </Box>
+  );
+}
+
+export default C;
+
+
+
+
+import React, { useState } from 'react'; 
+import { useNavigate } from "react-router-dom";
+import BackButton from './shortComponents/BackButton';
+
+const Layout = ( { content }) => {
+  const navigate = useNavigate();
+  const [displayContent, setDisplayContent] = useState( content )
+  
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    const storedValue = localStorage.getItem('isSidebarOpen');
+    return storedValue === 'true';
+  });
+
+  // Add this line to the button's onClick event
+  localStorage.setItem('isSidebarOpen', !isSidebarOpen);
+  
+  // Mock menu items
+  const menuItems = [
+    { icon: '🏠', label: 'Main' },
+    { icon: '🔍', label: 'Search' },
+    { icon: '🔔', label: 'Notifications' },
+    { icon: '⚙️', label: 'Settings' },
+    { icon: '❓', label: 'Help' }
+  ];
+
+  const serchEngine = () =>{
+    console.log( displayContent.props )
+  }
+
+
+  return (
+    <div className="flex h-screen bg-gray-100">
+      {/* Sidebar */}
+      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-white border-r transition-all duration-300 flex flex-col`}>
+        {/* Sidebar Header */}
+        <div className="h-16 border-b flex items-center justify-between px-4">
+          {isSidebarOpen && <h1 className="font-bold text-xl">Dashboard</h1>}
+          <button 
+            onClick={() => {
+              setIsSidebarOpen(!isSidebarOpen);
+              localStorage.setItem('isSidebarOpen', !isSidebarOpen);
+            }}
+            className="p-2 hover:bg-gray-100 rounded-lg"
+          >
+            {isSidebarOpen ? '◀️' : '▶️'}
+          </button>
+        </div>
+
+        {/* Navigation Menu */}
+        <nav className="flex-1 pt-4">
+          {menuItems.map((item, index) => (
+            <button
+              key={index}
+              className={`w-full flex items-center px-4 py-3 hover:bg-gray-100 ${
+                isSidebarOpen ? 'justify-start' : 'justify-center'
+              }`}
+              onClick={()=>{ navigate(`/${item.label}`) }}
+            >
+              <span className="text-xl">{item.icon}</span>
+              {isSidebarOpen && (
+                <span className="ml-3">{item.label}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {/* Sidebar Footer */}
+        <div className="border-t p-4">
+          <button className={`w-full flex items-center hover:bg-gray-100 p-2 rounded ${
+            isSidebarOpen ? 'justify-start' : 'justify-center'
+          }`}>
+            <span className="text-xl">👤</span>
+            {isSidebarOpen && <span className="ml-3">Logout</span>}
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top Navigation */}
+        <header className="h-16 bg-white border-b flex items-center justify-between px-6">
+          <div className="flex items-center w-full">
+            <BackButton/> 
+            <input
+              type="search"
+              placeholder="Search..."
+              className="w-full py-2 border rounded-lg focus:outline-none focus:border-blue-900"
+              onChange={serchEngine}
+            />
+          </div>
+          <div className="flex items-center gap-4">
+            <button className="p-2 hover:bg-gray-100 rounded-lg">🔔</button>
+            <button className="p-2 hover:bg-gray-100 rounded-lg">👤</button>
+          </div>
+        </header>
+
+        {/* Main Content Area */}
+        <main className="flex overflow-auto p-6">
+          <div className="w-full">
+            {/* work space */} 
+            { displayContent }
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+};
+
+export default Layout;
+
+
+
+const pathsToSearch = [
+        '1-1', '1-2', '1-3', '1-4', '1-5', '1-6', '1-7', '1-8', '1-9', '1-10',
+        '2-1', '2-2', '2-3', '2-4', '2-5', '2-6', '2-7', '2-8', '2-9', '2-10'
+    ];  
+
+
+import * as React from 'react';
+import { useState, useEffect } from 'react';
+import Stack from '@mui/material/Stack';
+import FormControl from '@mui/material/FormControl';
+import FormLabel from '@mui/material/FormLabel';
+import RadioGroup from '@mui/material/RadioGroup';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Radio from '@mui/material/Radio';
+import { BarChart } from '@mui/x-charts/BarChart';
+import { axisClasses } from '@mui/x-charts/ChartsAxis';
+import { getFirestore, collection, getDocs } from 'firebase/firestore';
+import { app } from '../firebase-config';
+
+function TickParamsSelector({
+  tickPlacement,
+  tickLabelPlacement,
+  setTickPlacement,
+  setTickLabelPlacement,
+}) {
+  return (
+    <Stack direction="column" spacing={2} sx={{ width: '100%', mb: 2 }}>
+      <FormControl>
+        <FormLabel id="tick-placement-radio-buttons-group-label">
+          Tick Placement
+        </FormLabel>
+        <RadioGroup
+          row
+          aria-labelledby="tick-placement-radio-buttons-group-label"
+          name="tick-placement"
+          value={tickPlacement}
+          onChange={(event) => setTickPlacement(event.target.value)}
+        >
+          <FormControlLabel value="start" control={<Radio />} label="start" />
+          <FormControlLabel value="end" control={<Radio />} label="end" />
+          <FormControlLabel value="middle" control={<Radio />} label="middle" />
+          <FormControlLabel
+            value="extremities"
+            control={<Radio />}
+            label="extremities"
+          />
+        </RadioGroup>
+      </FormControl>
+      <FormControl>
+        <FormLabel id="label-placement-radio-buttons-group-label">
+          Label Placement
+        </FormLabel>
+        <RadioGroup
+          row
+          aria-labelledby="label-placement-radio-buttons-group-label"
+          name="label-placement"
+          value={tickLabelPlacement}
+          onChange={(event) => setTickLabelPlacement(event.target.value)}
+        >
+          <FormControlLabel value="tick" control={<Radio />} label="tick" />
+          <FormControlLabel value="middle" control={<Radio />} label="middle" />
+        </RadioGroup>
+      </FormControl>
+    </Stack>
+  );
+}
+
+const chartSetting = {
+  yAxis: [
+    { 
+      label: 'Quantity (Imported - Exported)',
+      min: 0 // Set minimum value to 0 or adjust as needed
+    }
+  ],
+  width: 800, // Add fixed width
+  height: 400, // Increased height for better visibility
+  margin: { top: 20, right: 30, bottom: 50, left: 60 }, // Add margins
+  sx: {
+    [`& .${axisClasses.directionY} .${axisClasses.label}`]: {
+      transform: 'translateX(-20px)',
+    },
+  },
+};
+
+function MaterialQuantityChart() {
+  const [tickPlacement, setTickPlacement] = useState('middle');
+  const [tickLabelPlacement, setTickLabelPlacement] = useState('middle');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [chartData, setChartData] = useState([]);
+  const db = getFirestore(app);
+
+  useEffect(() => {
+    async function fetchData() {
+      setIsLoading(true);
+      try {
+        // Fetch vessel data
+        const vesselSnapshot = await getDocs(collection(db, 'vessel_data'));
+        const vesselData = vesselSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        // Fetch reclamation data
+        const reclamationSnapshot = await getDocs(collection(db, 'reclamationData'));
+        const reclamationData = reclamationSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        // Process the data
+        const materialQuantities = {};
+
+        // Process vessel data (imports)
+        vesselData.forEach(vessel => {
+          if (!vessel.material || !vessel.quantity) return;
+          
+          const material = Array.isArray(vessel.material) 
+            ? vessel.material[0] 
+            : vessel.material;
+
+          if (!materialQuantities[material]) {
+            materialQuantities[material] = {
+              material,
+              imported: 0,
+              exported: 0,
+              paths: new Set()
+            };
+          }
+
+          const quantity = parseInt(vessel.quantity, 10);
+          if (!isNaN(quantity)) {
+            materialQuantities[material].imported += quantity;
+          }
+
+          if (vessel.path) {
+            const paths = Array.isArray(vessel.path) ? vessel.path : [vessel.path];
+            paths.forEach(path => materialQuantities[material].paths.add(path));
+          }
+        });
+
+        // Process reclamation data (exports)
+        reclamationData.forEach(reclamation => {
+          if (!reclamation.typeOfMaterial || !reclamation.totalTon) return;
+
+          const material = Array.isArray(reclamation.typeOfMaterial)
+            ? reclamation.typeOfMaterial[0]
+            : reclamation.typeOfMaterial;
+
+          if (!materialQuantities[material]) {
+            materialQuantities[material] = {
+              material,
+              imported: 0,
+              exported: 0,
+              paths: new Set()
+            };
+          }
+
+          const quantity = parseInt(reclamation.totalTon, 10);
+          if (!isNaN(quantity)) {
+            materialQuantities[material].exported += quantity;
+          }
+        });
+
+        // Transform data for chart
+        const processedData = Object.values(materialQuantities).map(item => ({
+          material: item.material,
+          quantity: Math.max(0, item.imported - item.exported), // Ensure non-negative
+          paths: Array.from(item.paths)
+        }));
+
+        // Sort by quantity for better visualization
+        processedData.sort((a, b) => b.quantity - a.quantity);
+
+        setChartData(processedData);
+        setIsLoading(false);
+      } catch (err) {
+        console.error('Error fetching data:', err);
+        setError('Failed to load data');
+        setIsLoading(false);
+      }
+    }
+
+    fetchData();
+  }, [db]);
+
+  const handleBarHover = (event, barData) => {
+    if (!barData) return;
+    
+    const dataPoint = chartData[barData.dataIndex];
+    if (dataPoint) {
+      const paths = dataPoint.paths.join(', ') || 'No paths available';
+      alert(
+        `Material: ${dataPoint.material}\n` +
+        `Quantity: ${dataPoint.quantity}\n` +
+        `Paths: ${paths}`
+      );
+    }
+  };
+
+  if (isLoading) return <div>Loading chart data...</div>;
+  if (error) return <div>Error: {error}</div>;
+  if (!chartData.length) return <div>No data available</div>;
+
+  return (
+    <Stack spacing={2} sx={{ width: '100%', p: 2 }}>
+      <TickParamsSelector
+        tickPlacement={tickPlacement}
+        tickLabelPlacement={tickLabelPlacement}
+        setTickPlacement={setTickPlacement}
+        setTickLabelPlacement={setTickLabelPlacement}
+      />
+      <BarChart
+        dataset={chartData}
+        xAxis={[{
+          scaleType: 'band',
+          dataKey: 'material',
+          tickPlacement,
+          tickLabelPlacement,
+          label: 'Materials'
+        }]}
+        series={[{
+          dataKey: 'quantity',
+          label: 'Net Quantity',
+          valueFormatter: (value) => `${value.toLocaleString()} units`
+        }]}
+        {...chartSetting}
+        onBarHover={handleBarHover}
+      />
+    </Stack>
+  );
+}
+
+export default MaterialQuantityChart;
+
+
+
+import React, { useEffect, useState } from 'react'; 
+import { useNavigate } from "react-router-dom";
+import BackButton from './shortComponents/BackButton';
+import Profil from './shortComponents/Profil';
+
+const Layout = ({ content, settings }) => {
+  const navigate = useNavigate();
+  const [displayContent, setDisplayContent] = useState(content);
+  
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    const storedValue = localStorage.getItem('isSidebarOpen');
+    return storedValue === 'true';
+  });
+
+  // Popup states
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  
+  // Mock menu items
+  const menuItems = [
+    { icon: '🏠', label: 'Main' },
+    { icon: '🔍', label: 'Search' },
+    { icon: '🔔', label: 'Notifications' },
+    { icon: '⚙️', label: 'Settings' },
+    { icon: '❓', label: 'Help' }
+  ];
+
+  function filterCollections(data, searchKeyword) {
+    // Helper function to recursively filter data
+    function filterData(data, searchKeyword) {
+        if (Array.isArray(data)) {
+            // If data is an array, filter each element and keep the array structure
+            const filteredArray = data
+                .map(item => filterData(item, searchKeyword))
+                .filter(item => item !== undefined && item !== null);
+            return filteredArray.length > 0 ? filteredArray : undefined;
+        } else if (typeof data === 'object' && data !== null) {
+            // If data is an object, filter each key-value pair and keep the object structure
+            const filteredObject = {};
+            for (const key in data) {
+                if (data.hasOwnProperty(key)) {
+                    const filteredValue = filterData(data[key], searchKeyword);
+                    if (filteredValue !== undefined && filteredValue !== null) {
+                        filteredObject[key] = filteredValue;
+                    }
+                }
+            }
+            return Object.keys(filteredObject).length > 0 ? filteredObject : undefined;
+        } else if (typeof data === 'function') {
+            // If data is a function, keep it as is
+            return data;
+        } else {
+            // If data is a primitive (string, number, boolean), check if it matches the searchKeyword
+            if (String(data).toLowerCase().includes(searchKeyword.toLowerCase())) {
+                return data;
+            }
+            return undefined;
+        }
+    }
+
+    // Start filtering from the root level
+    const filteredData = filterData(data, searchKeyword);
+
+    // Return the filtered data in the same format and type as the input
+    return filteredData !== undefined ? filteredData : data;
+  }
+ 
+  const searchEngine = (p) => {
+    const data = content.props;
+    const target = p.target.value.trim();
+    const result = filterCollections(data, target);
+    console.log(data, target, result); 
+
+    setDisplayContent((prevDisplayContent) => ({
+      ...prevDisplayContent, // Copy existing state
+      props: result, // Update the props field with the filtered result
+    }));
+  };
+
+  // Handle logout action
+  const handleLogout = () => {
+    // Implement actual logout logic here
+    console.log("Logging out...");
+    setIsLogoutModalOpen(false);
+    // Navigate to login page or perform other logout actions
+    // navigate('/login');
+  };
+
+  useEffect(() => {
+    setDisplayContent(content);
+  }, [content]);
+
+  // Close modals when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      const logoutModal = document.getElementById("logout-modal");
+      const profileModal = document.getElementById("profile-modal");
+      
+      if (logoutModal && !logoutModal.contains(event.target) && 
+          !event.target.classList.contains("logout-trigger")) {
+        setIsLogoutModalOpen(false);
+      }
+      
+      if (profileModal && !profileModal.contains(event.target) && 
+          !event.target.classList.contains("profile-trigger")) {
+        setIsProfileModalOpen(false);
+      }
+    };
+    
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+
+  return (
+    <div className="flex h-screen ">
+      {/* Sidebar */}
+      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'}  border-r transition-all duration-300 flex flex-col`}>
+        {/* Sidebar Header */}
+        <div className="h-16 border-b flex items-center justify-between px-4">
+          {isSidebarOpen && <h1 className="font-bold text-xl">Dashboard</h1>}
+          <button 
+            onClick={() => {
+              setIsSidebarOpen(!isSidebarOpen);
+              localStorage.setItem('isSidebarOpen', !isSidebarOpen);
+            }}
+            className="p-2 hover:bg-gray-100 rounded-lg"
+          >
+            {isSidebarOpen ? '◀️' : '▶️'}
+          </button>
+        </div>
+
+        {/* Navigation Menu */}
+        <nav className="flex-1 pt-4">
+          {menuItems.map((item, index) => (
+            <button
+              key={index}
+              className={`w-full flex items-center px-4 py-3 hover:bg-gray-100 ${
+                isSidebarOpen ? 'justify-start' : 'justify-center'
+              }`}
+              onClick={() => { navigate(`/${item.label}`) }}
+            >
+              <span className="text-xl">{item.icon}</span>
+              {isSidebarOpen && (
+                <span className="ml-3">{item.label}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {/* Sidebar Footer */}
+        <div className="border-t p-4">
+          <button 
+            className={`w-full flex items-center hover:bg-gray-100 p-2 rounded ${
+              isSidebarOpen ? 'justify-start' : 'justify-center'
+            } logout-trigger`}
+            onClick={() => setIsLogoutModalOpen(true)}
+          >
+            <span className="text-xl">👤</span>
+            {isSidebarOpen && <span className="ml-3">Logout</span>}
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top Navigation */}
+        <header className="h-16  border-b flex items-center justify-between  px-4 py-3">
+          <div className="flex items-center w-full">
+            <BackButton/> 
+            <input
+              type="search"
+              placeholder="Search..." 
+              className={`${settings.theme === 'dark' ? 'bg-gray-900 text-gray-300' : 'bg-gray-50 text-gray-800'} w-full py-2 border rounded-lg focus:outline-none focus:border-blue-900`}
+              onChange={searchEngine}
+            />
+          </div>
+          <div className="flex items-center gap-4">
+            {/* <button className="p-2 hover:bg-gray-100 rounded-lg">🔔</button> */}
+            <button 
+              className="p-2 hover:bg-gray-100 rounded-lg profile-trigger"
+              onClick={() => setIsProfileModalOpen(true)}
+            >
+              👤
+            </button>
+          </div>
+        </header>
+
+        {/* Main Content Area */}
+        <main className="flex overflow-auto p-0">
+          <div className="w-full">
+            {/* work space */} 
+            {displayContent}
+          </div>
+        </main>
+      </div>
+
+      {/* Logout Modal */}
+      {isLogoutModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div id="logout-modal" className=" rounded-lg shadow-xl w-96 overflow-hidden">
+            <div className="bg-red-50 p-4 border-b border-red-100">
+              <h2 className="text-xl font-semibold text-red-700">Confirm Logout</h2>
+            </div>
+            <div className="p-6">
+              <p className="mb-4">Are you sure you want to logout from your account?</p>
+              <p className="text-sm text-gray-500 mb-6">You will need to enter your credentials again to access the dashboard.</p>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setIsLogoutModalOpen(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Profile Modal */}
+      {isProfileModalOpen && ( <Profil modal={setIsProfileModalOpen}/>  )}
+    </div>
+  );
+};
+
+export default Layout;
