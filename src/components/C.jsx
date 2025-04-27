@@ -890,7 +890,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       /> 
 
       {/* Edit Dialog */} 
-      <ErrorBoundary>
+      {/* <ErrorBoundary> */}
         <EditItemDialog
           open={isEditDialogOpen}
           onClose={() => setIsEditDialogOpen(false)}
@@ -902,7 +902,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
           collectionName={collectionName}
           title={editingItem?.rakeNo || editingItem?.Vessel_name || 'Edit Item'} // Safe title access
         />
-      </ErrorBoundary>
+      {/* </ErrorBoundary> */}
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onClose={() => setIsDeleteDialogOpen(false)}>
         <DialogTitle>Confirm Delete</DialogTitle>

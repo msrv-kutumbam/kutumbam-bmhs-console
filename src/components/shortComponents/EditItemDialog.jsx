@@ -603,7 +603,7 @@ const EditItemDialog = ({
                           </TableRow>
                         </TableHead>
                         <TableBody>
-                          {delays.map((delay, index) => (
+                          {[...delays].reverse().map((delay, index) => (
                             <TableRow key={index} hover>
                               <TableCell sx={{ fontSize: '0.75rem' }}>
                                 <Tooltip 
