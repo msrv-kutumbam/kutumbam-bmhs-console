@@ -21,7 +21,7 @@ import DetailsShowPopUP from './shortComponents/DetailsShowPopUP';
 import AddItemDialog from './shortComponents/AddItemDialog';
 import EditItemDialog from './shortComponents/EditItemDialog';
 import ErrorBoundary from './Dev/ErrorBoundary';
-
+// import {AddItemDialog, EditItemDialog} from './shortComponents/ADD_EDIT';
 
 // Constants
 const COLUMN_NAME_MAPPING = {

@@ -1,44 +1,546 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getFirestore, collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDoc, setDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { app } from '../firebase-config';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  IconButton,
-  Typography,
-  Box,
-  Snackbar,
-  Alert,
-  MenuItem,
-  Select,
-  FormControl,
-  InputLabel,
-  Checkbox,
-  ListItemText,
+  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
+  Typography, Box, Snackbar, Alert, MenuItem, Select, FormControl,
+  InputLabel, Checkbox, ListItemText, Tooltip, IconButton, Paper
 } from '@mui/material';
-import { Edit as EditIcon, Delete as DeleteIcon, Add as AddIcon, FileDownload as FileDownloadIcon } from '@mui/icons-material';
+import {
+  Edit as EditIcon, Delete as DeleteIcon, Add as AddIcon,
+  FileDownload as FileDownloadIcon, ContentCopy, Share
+} from '@mui/icons-material';
+import TextSnippetIcon from '@mui/icons-material/TextSnippet';
 import Papa from 'papaparse';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import { MaterialReactTable, useMaterialReactTable } from 'material-react-table';
+import Report_betweenDates from './shortComponents/Report_betweenDates';
+import DetailsShowPopUP from './shortComponents/DetailsShowPopUP';
+import AddItemDialog from './shortComponents/AddItemDialog';
+import EditItemDialog from './shortComponents/EditItemDialog';
+import ErrorBoundary from './Dev/ErrorBoundary';
+// import {AddItemDialog, EditItemDialog} from './shortComponents/ADD_EDIT';
 
-function C({ colletionsData }) {
-  const location = useLocation();
+// Constants
+const COLUMN_NAME_MAPPING = {
+  Vessel_name: 'Vessel Name', 
+  quantity: 'Quantity',
+  remarks: 'Notes',
+  u_validation: 'Validation Status',
+  typeOfMaterial: 'Material Type',
+  berthing_time: 'Berthing Time',
+  completion_time: 'Completion Time',
+  total_time: 'Total Time',
+  conv_start: 'Start',
+  wlPlaced:'Placed', wlLoaded:'Loaded', numberOfSick : 'Sicks', manualLoaded:'Manual',
+  sr: 'SR Operator', totalTon:'Total Ton', stopTime:'Stop Time', actualTime:'Actual Time',
+  wl: 'WL Operator', startTime:'Start Time', totalTime:'Total TIme',
+};
+// DataTable Component
+const DataTable = ({ 
+  data, 
+  setData,
+  fields, 
+  columns, 
+  collectionName, 
+  currentTheme, 
+  canCreate, 
+  canRead, 
+  canUpdate, 
+  canDelete, 
+  onEdit, 
+  onDelete, 
+  onOpenDownloadDialog, 
+  navigate,
+  startDateV,
+  setStartDateV,
+  endDateV,
+  setEndDateV,
+  fetchCollections,
+  settings, 
+}) => {
+  const [detailPopup, setDetailPopup] = useState({ open: false, data: null });
+
+  const handleCopyData = () => {
+    navigator.clipboard.writeText(JSON.stringify(detailPopup.data, null, 2));
+    showSnackbar('Data copied to clipboard!');
+  };
+
+  const handleShareData = async () => {
+    try {
+      await navigator.share({
+        title: 'Record Details',
+        text: JSON.stringify(detailPopup.data, null, 2),
+      });
+    } catch (err) {
+      showSnackbar('Sharing failed: ' + err.message, 'error');
+    }
+  };
+
+  const tableColumns = useMemo(() => [
+    ...columns.map((col) => {
+      const columnConfig = {
+        ...col,
+        header: COLUMN_NAME_MAPPING[col.accessorKey] || col.header,
+      };
+
+      // Base64 Image Handling
+      if (col.accessorKey === 'profileImageUrl') {
+        return {
+          ...columnConfig,
+          Cell: ({ row }) => (
+            <img
+              src={row.original[col.accessorKey]}
+              alt="Profile"
+              style={{ width: 50, height: 50, borderRadius: '50%' }}
+              onError={(e) => e.target.style.display = 'none'}
+            />
+          ),
+        };
+      }
+
+      // PDF Handling
+      if (col.accessorKey === 'pdfField') {
+        return {
+          ...columnConfig,
+          Cell: ({ row }) => (
+            <Button 
+              variant="outlined" 
+              size="small"
+              onClick={() => window.open(row.original[col.accessorKey], '_blank')}
+            >
+              View PDF
+            </Button>
+          ),
+        };
+      }
+
+      // Validation Status
+      if (col.accessorKey === 'u_validation') {
+        return {
+          ...columnConfig,
+          Cell: ({ row }) => (
+            <Box
+              sx={{
+                color: row.original[col.accessorKey] ? 'success.main' : 'info.main',
+                fontWeight: 'bold',
+                textTransform: 'capitalize'
+              }}
+            >
+              {String(row.original[col.accessorKey])}
+            </Box>
+          ),
+        };
+      }
+
+      // Remarks Field
+      if (col.accessorKey === 'remarks') {
+        return {
+          ...columnConfig,
+          Cell: ({ row }) => (
+            <Tooltip title={row.original[col.accessorKey] || ''}>
+              <Box
+                sx={{
+                  color: row.original[col.accessorKey]?.toLowerCase() === 'nill' 
+                    ? 'success.main' 
+                    : 'text.primary',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
+                {row?.original[col?.accessorKey]?.length > 20 ? row?.original[col?.accessorKey].substring(0, 20) + '...' : row?.original[col?.accessorKey]}
+              </Box>
+            </Tooltip>
+          ),
+        };
+      }
+      // delay Field
+      if (col.accessorKey === 'delays') {
+        return {
+          ...columnConfig,
+          Cell: ({ row }) => {
+            const delays = row.original[col.accessorKey] || [];
+            
+            // Format the delays array for display
+            const formattedDelays = delays.map(delay => (
+              `${delay.reason || 'Unknown'}: ${delay.duration || 'N/A'}`
+            )).join(', ');
+      
+            return (
+              <Tooltip 
+                title={
+                  <Box>
+                    {delays.length === 0 ? 'No delays' : (
+                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                        {delays.map((delay, index) => (
+                          <li key={index}>
+                            <strong>Reason:</strong> {delay.reason || 'Unknown'}<br />
+                            <strong>Duration:</strong> {delay.duration || 'N/A'}<br />
+                            <strong>Date:</strong> {delay.date || 'Not specified'}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </Box>
+                }
+              >
+                <Box
+                  sx={{
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    color: delays.length === 0 ? 'success.main' : 'warning.main'
+                  }}
+                >
+                  {delays.length === 0 
+                    ? 'No delays' 
+                    : `${delays.length} delay${delays.length > 1 ? 's' : ''}`
+                  }
+                </Box>
+              </Tooltip>
+            );
+          },
+        };
+      }
+      return columnConfig;
+    }),
+    {
+      id: 'actions',
+      header: 'Actions',
+      size: 150,
+      Cell: ({ row }) => (
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="View Details">
+            <IconButton
+              onClick={() => setDetailPopup({ open: true, data: row.original })}
+              color="primary"
+              size="small"
+            >
+              <TextSnippetIcon />
+            </IconButton>
+          </Tooltip>
+          
+          {canUpdate() && (
+            <Tooltip title="Edit">
+              <IconButton
+                onClick={() => onEdit(row.original)}
+                color="primary"
+                size="small"
+              >
+                <EditIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+          
+          {canDelete() && (
+            <Tooltip title="Delete">
+              <IconButton
+                onClick={() => onDelete(row.original.id)}
+                color="error"
+                size="small"
+              >
+                <DeleteIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+      ),
+    },
+  ], [columns, canUpdate, canDelete, onEdit, onDelete]);
+
+  // Configure the MaterialReactTable
+  const table = useMaterialReactTable({
+    data,
+    columns: tableColumns,
+    enableColumnFilters: true,
+    enableSorting: true,
+    enablePagination: true,
+    enableRowSelection: false,
+    initialState: { 
+      pagination: { pageSize: 5, pageIndex: 0 },
+      density: 'compact', 
+    },
+    muiTableHeadCellProps: {
+      sx: {
+        fontWeight: 'bold',  
+        backgroundColor: currentTheme.tableHeaderColor, 
+        color: currentTheme.textColor, 
+        border: currentTheme.border, 
+        borderRadius: currentTheme.borderRadius, 
+        boxShadow: currentTheme.boxShadow 
+      }, 
+    },
+    renderEmptyRowsFallback: () => (
+      <Box sx={{ 
+        display: 'flex', 
+        // justifyContent: 'center',
+        p: 2,
+        backgroundColor: currentTheme.tableHeaderColor, 
+        color: currentTheme.textColor, 
+        border: currentTheme.border, 
+        borderRadius: currentTheme.borderRadius, 
+        boxShadow: currentTheme.boxShadow 
+      }}>
+        <Typography
+          className="cursor-pointer"
+          onClick={() => {
+            navigate('/Main');
+          }}
+        >
+          <a> No data available. Click here to redirect to Main. </a> 
+        </Typography>
+      </Box>  
+    ),
+    renderTopToolbarCustomActions: () => (
+      <Box sx={{ 
+        display: 'flex', 
+        gap: 2, 
+        p: 1,
+        backgroundColor: currentTheme.tableHeaderColor, 
+        color: currentTheme.textColor, 
+        border: currentTheme.border, 
+        borderRadius: currentTheme.borderRadius, 
+        boxShadow: currentTheme.boxShadow 
+      }}>
+        {canRead() && (
+          <Button
+            variant="contained"
+            startIcon={<FileDownloadIcon />}
+            onClick={onOpenDownloadDialog}
+          />
+        )}
+        {canCreate() && (
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => onEdit(null)}
+          />
+        )}
+      </Box>
+    ),
+  });
+
+  return (
+    <>
+      <>
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          mb: 3, 
+          flexWrap: { xs: 'wrap', md: 'nowrap' },  
+          color: currentTheme.textColor
+        }}>
+          <Typography variant="h6" component="h1" sx={{ 
+            fontSize: 22, 
+            flexBasis: { xs: '100%', md: 'auto' }, 
+            mb: { xs: 2, md: 0 }, 
+            color: currentTheme.textColor 
+          }}>
+            {collectionName?.charAt(0).toUpperCase() + collectionName?.slice(1)}
+          </Typography>  
+          <Box sx={{ 
+            display: 'flex', 
+            gap: 2, 
+            flexBasis: { xs: '100%', md: 'auto' }, 
+            alignItems: 'center',  
+            color: currentTheme.textColor
+          }}>
+            <TextField
+              type="date"
+              value={startDateV}
+              onChange={(e) => setStartDateV(e.target.value)}
+              sx={{ 
+                width: { xs: '45%', md: '30%' }, 
+                '& .MuiInputBase-root': { 
+                  height: 36, 
+                  backgroundColor: currentTheme.paperBackground, 
+                  color: currentTheme.textColor,
+                  border: currentTheme.border,
+                },
+              }}
+            />
+            <TextField
+              type="date"
+              value={endDateV}
+              onChange={(e) => setEndDateV(e.target.value)}
+              sx={{ 
+                width: { xs: '45%', md: '30%' }, 
+                '& .MuiInputBase-root': { 
+                  height: 36, 
+                  backgroundColor: currentTheme.paperBackground, 
+                  color: currentTheme.textColor,
+                  border: currentTheme.border, 
+                },
+              }}
+            />
+            <Button
+              variant="contained"
+              onClick={() => { 
+                setData([]) ;
+                fetchCollections(collectionName, startDateV, endDateV);
+              }}
+              sx={{ 
+                width: { xs: '10%', md: '10%' }, 
+                height: 36, 
+                minWidth: 'fit-content', 
+                backgroundColor: currentTheme.buttonColor, 
+                color: currentTheme.textColor, 
+                '&:hover': { 
+                  backgroundColor: currentTheme.buttonHoverColor 
+                }
+              }}
+            > 
+              Go 
+            </Button>
+          </Box>
+        </Box>
+
+        {/* MaterialReactTable Component */}
+        <MaterialReactTable 
+          table={table} 
+          sx={{
+            backgroundColor: currentTheme.backgroundColor, 
+            color: currentTheme.textColor, 
+            border: currentTheme.border, 
+            borderRadius: currentTheme.borderRadius, 
+            boxShadow: currentTheme.boxShadow 
+          }}
+        />
+
+        {/* Analytical data */}
+        <Report_betweenDates 
+          themeStyles={currentTheme} 
+          settings={settings} 
+          data={data} 
+          collectionName={collectionName} 
+        />
+      </>
+      
+      {/* Detail Popup */}
+      <Dialog open={detailPopup.open} onClose={() => setDetailPopup({ open: false, data: null })}>
+        <DialogTitle>Record Details</DialogTitle>
+        <DialogContent>
+          <Paper sx={{ p: 2, minWidth: 300 }}>
+            {detailPopup.data && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}> 
+                <DetailsShowPopUP 
+                  data ={detailPopup.data}  
+                  onClose={() => setDetailPopup({ open: false, data: null })}
+                  isLoading = {false}
+                  error = {null}
+                  collectionType ={collectionName}
+                />
+
+              </Box>
+            )}
+          </Paper>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            startIcon={<ContentCopy />} 
+            onClick={handleCopyData}
+          >
+            Copy
+          </Button>
+          <Button 
+            startIcon={<Share />} 
+            onClick={handleShareData}
+            disabled={!navigator.share}
+          >
+            Share
+          </Button>
+          <Button onClick={() => setDetailPopup({ open: false, data: null })}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog> 
+    </>
+  );
+};
+
+// Main Component
+function C({ settings, setShowHeadder, userData, fetchCollections, colletionsData }) {
+  const location = useLocation(); 
   const navigate = useNavigate();
   const queryParams = new URLSearchParams(location.search);
   const collectionName = queryParams.get('collection');
-  const [data, setData] = useState(colletionsData[collectionName] || []); // Local state for data
+  const [data, setData] = useState(colletionsData[collectionName] || [] ); 
+ 
+  const dealyStrucure = {
+    type: "array",
+    label: "Delays",
+    itemStructure: {
+      from: {
+        type: "datetime-local",  // Changed from "time" to "datetime-local"
+        label: "From",
+        required: true
+      },
+      to: {
+        type: "datetime-local",  // Changed from "time" to "datetime-local"
+        label: "To",
+        required: true
+      },
+      reason: {
+        type: "text",
+        label: "Reason",
+        required: true
+      },
+      total: {
+        type: "text",
+        label: "Duration",
+        readonly: true
+      }
+    } 
+  }
+
+  const formStructures = {
+    vessel_data: {
+      Vessel_name :{ type: 'text', label: 'Vessel Name', required: true },
+      material: { type: 'text', label: 'Materials', required: true },
+      quantity: { type: 'number', label: 'Quantity', required: true },
+      berthing_time: { type: 'datetime-local', label: 'Berthing Date-Time', required: true },
+      clearance: { type: 'datetime-local', label: 'Clearance Date-Time', required: true },
+      conv_start: { type: 'datetime-local', label: 'Conveyor Start Date-Time', required: true },
+      completion_time: { type: 'datetime-local', label: 'Completion Date-Time', required: true },
+      path: { type: 'text', structure:"array separated with coma", label: 'Path SR-SP-BAY&BAY, ', required: true },
+      total_time: { type: 'text', structure:"nn:nn", label: 'Total Time 00:00', required: true },
+      remarks:{ type: 'textarea', label: 'Remarks', required: false, defaultValue: '' },
+      delays: dealyStrucure,
+    }, 
+    reclamationData: {
+      date: { type: 'date', label: 'Date', required: true },
+      rakeNo: { type: 'text', label: "RakeNo ED.00 00-00-00", required: true },
+      typeOfMaterial: { type: 'text', structure:"array separated with coma", label: 'Type of Material', required: true },
+      path: { type: 'text', structure:"array separated with coma", label: 'Path SR-SP-BAY&BAY, ', required: true },
+      totalTon: { type: 'number', structure:"nn:nn", label: 'Total Tonnage', required: true },
+      average: { type: 'number', structure:"Avarage", label: 'Average', required: true },
+      placement: { type: 'datetime-local', label: 'Placement', required: true },
+      clearance: { type: 'datetime-local', label: 'Clearance', required: true },
+      startTime: { type: 'datetime-local', label: 'Start Time', required: true },
+      stopTime: { type: 'datetime-local', label: 'Stop Time', required: true },
+      totalTime: { type: 'text', label: 'Total Time 00:00', required: true },
+      actualTime: { type: 'text', label: 'Actual Time 00:00', required: true },
+      wlPlaced: { default:0, type: 'number', label: 'WL Placed', required: true },
+      manualLoaded: { default:0, type: 'number', label: 'Manual Loaded', required: true },
+      numberOfSick: { default:0, type: 'number', label: 'Number of Sick', required: true },
+      wlLoaded: { default:0, type: 'number', label: 'WL Loaded', required: true },
+      sr: { type: 'text', structure:"array separated with coma", label: 'SR oporator', required: true },
+      wl: { type: 'text', structure:"array separated with coma", label: 'WL oporator', required: true },
+      CRoomOPerator: { type: 'text', structure:"array separated with coma", label: 'CRO', required: false },
+      ShiftIncharge: { type: 'text', structure:"array separated with coma", label: 'Shift Incharge', required: false },
+      delays: dealyStrucure,
+      remarks:{ type: 'textarea', label: 'Remarks', required: false, defaultValue: '' }
+    }
+  };
+
+  useEffect(() => {
+    setData(colletionsData[collectionName] || []); 
+    // console.log( "colletionsData --", colletionsData)
+  }, [colletionsData, collectionName]);
 
   const [editingItem, setEditingItem] = useState(null);
   const [newItem, setNewItem] = useState({});
@@ -53,21 +555,56 @@ function C({ colletionsData }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isDownloadDialogOpen, setIsDownloadDialogOpen] = useState(false);
+  
+  // From to dates  
+  const [startDateV, setStartDateV] = useState(() => { 
+    return localStorage.getItem(`${collectionName}-startDate`) || ''; 
+  });
+  const [endDateV, setEndDateV] = useState(() => { 
+    return localStorage.getItem(`${collectionName}-endDate`) || '';
+  });
+  useEffect(() => {
+    if (startDateV) {
+      localStorage.setItem(`${collectionName}-startDate`, startDateV);
+    }
+    if (endDateV) {
+      localStorage.setItem(`${collectionName}-endDate`, endDateV);
+    }
+  }, [startDateV, endDateV, collectionName]);
 
   const db = getFirestore(app);
+  useEffect(() => { 
+    setShowHeadder(false);
+  }, []);
 
-  // Get fields excluding 'id'
-  const fields = data.length > 0 ? Object.keys(data[0]).filter((key) => key !== 'id') : [];
+  const fields = useMemo(() => {  
+    if (collectionName === "reclamationData" || collectionName === "vessel_data") {
+      return Object.keys(formStructures[collectionName]);
+    } else {
+      return data.length > 0 ? Object.keys(data[0]).filter((key) => key !== 'id') : [];
+    }
+  }, [data, collectionName]);
+
+  // Helper functions to check permissions
+  const canCreate = () => userData?.access.includes('C');
+  const canUpdate = () => userData?.access.includes('U');
+  const canDelete = () => userData?.access.includes('D');
+  const canRead = () => userData?.access.includes('R');
 
   const showSnackbar = (message, severity = 'success') => {
     setSnackbar({ open: true, message, severity });
   };
 
   const handleAdd = async () => {
+    if (!canCreate()) {
+      showSnackbar('You do not have permission to create items', 'error');
+      return;
+    }
+
     try {
       const collectionRef = collection(db, collectionName);
       const docRef = await addDoc(collectionRef, newItem);
-      setData([...data, { id: docRef.id, ...newItem }]); // Update local state
+      setData([...data, { id: docRef.id, ...newItem }]);
       setIsAddDialogOpen(false);
       setNewItem({});
       showSnackbar('Item added successfully');
@@ -78,12 +615,17 @@ function C({ colletionsData }) {
   };
 
   const handleUpdate = async () => {
+    if (!canUpdate()) {
+      showSnackbar('You do not have permission to update items', 'error');
+      return;
+    }
+
     try {
       const docRef = doc(db, collectionName, editingItem.id);
-      const updateData = { ...editingItem };
+      const updateData = { ...editingItem, u_validation: editingItem.u_validation === 'true' };
       delete updateData.id;
       await updateDoc(docRef, updateData);
-      setData(data.map((item) => (item.id === editingItem.id ? { ...editingItem } : item))); // Update local state
+      setData(data.map((item) => (item.id === editingItem.id ? { ...editingItem } : item)));
       setIsEditDialogOpen(false);
       setEditingItem(null);
       showSnackbar('Item updated successfully');
@@ -94,20 +636,36 @@ function C({ colletionsData }) {
   };
 
   const handleDelete = async () => {
-    try {
-      const docRef = doc(db, collectionName, selectedId);
-      await deleteDoc(docRef);
-      setData(data.filter((item) => item.id !== selectedId)); // Update local state
+    if (!canDelete()) {
+      showSnackbar('You do not have permission to delete items', 'error');
+      return;
+    }
+    const delCollectionName = `del_${collectionName}`;
+    try { 
+      const docRef = doc(db, collectionName, selectedId); 
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        throw new Error('Document does not exist');
+      } 
+      const delDocRef = doc(db, delCollectionName, selectedId); 
+      await setDoc(delDocRef, docSnap.data()); 
+      await deleteDoc(docRef); 
+      setData(data.filter((item) => item.id !== selectedId));
       setIsDeleteDialogOpen(false);
-      showSnackbar('Item deleted successfully');
+      showSnackbar('Item moved to archive and deleted successfully');
     } catch (error) {
-      showSnackbar('Error deleting item', 'error');
-      console.error('Error deleting document: ', error);
+      showSnackbar('Error moving/deleting item', 'error');
+      console.error('Error in delete operation: ', error);
     }
   };
 
   // Download as CSV
   const downloadCSV = () => {
+    if (!canRead()) {
+      showSnackbar('You do not have permission to download data', 'error');
+      return;
+    }
+
     const filteredData = filterData(data);
     const csv = Papa.unparse(filteredData);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -118,15 +676,35 @@ function C({ colletionsData }) {
     showSnackbar('CSV downloaded successfully');
   };
 
-  // Download as PDF
+  // Download as PDF 
   const downloadPDF = () => {
+    if (!canRead()) {
+      showSnackbar('You do not have permission to download data', 'error');
+      return;
+    }
+  
+    // Mapping of original column names to custom names
+    const headerNameMapping = {
+      manualLoaded: 'Manual',
+      wlLoaded: 'Loaded',
+      typeOfMaterial: 'Material',
+      wlPlaced: 'Placed',
+      numberOfSick: 'sick',
+      // Add more mappings as needed
+    };
+  
+    // Transform the selectedColumns to custom header names
+    const customHeaders = selectedColumns.map((col) => {
+      return headerNameMapping[col] || col.charAt(0).toUpperCase() + col.slice(1);
+    });
+  
     const filteredData = filterData(data);
     const doc = new jsPDF();
     doc.autoTable({
-      head: [selectedColumns.map((col) => col.charAt(0).toUpperCase() + col.slice(1))],
+      head: [customHeaders], // Use the custom headers here
       body: filteredData.map((row) => selectedColumns.map((col) => row[col])),
     });
-    doc.save(`${collectionName}_${new Date().toISOString()}.pdf`);
+    doc.save(`${collectionName}_${new Date().toISOString()}.pdf`); 
     showSnackbar('PDF downloaded successfully');
   };
 
@@ -155,97 +733,95 @@ function C({ colletionsData }) {
     return filtered;
   };
 
-  return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          {collectionName?.charAt(0).toUpperCase() + collectionName?.slice(1)}
-        </Typography>
-        <Box>
-          <Button
-            variant="contained"
-            startIcon={<FileDownloadIcon />}
-            onClick={() => setIsDownloadDialogOpen(true)}
-            sx={{ mr: 2 }}
-          >
-            Download
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setIsAddDialogOpen(true)}
-          >
-            Add New Item
-          </Button>
-        </Box>
-      </Box>
+  // Enhanced columns with renamed headers
+  const columns = useMemo(() => {
+    if (fields.length === 0) return [];
+    
+    return fields.map((field) => ({
+      accessorKey: field,
+      header: COLUMN_NAME_MAPPING[field] || 
+             field.charAt(0).toUpperCase() + field.slice(1).replace(/_/g, ' '),
+      size: 150,
+    }));
+  }, [fields]);
 
-      {/* Scrollable Table Container */}
-      <Box sx={{ overflow: 'auto' }}>
-        <TableContainer component={Paper} elevation={3}>
-          <Table sx={{ minWidth: 650 }} size="small" aria-label="a dense table">
-            <TableHead>
-              <TableRow>
-                {fields.map((field) => (
-                  <TableCell
-                    key={field}
-                    sx={{ fontWeight: 'bold', position: 'sticky', top: 0, bgcolor: 'background.paper' }}
-                  >
-                    {field.charAt(0).toUpperCase() + field.slice(1)}
-                  </TableCell>
-                ))}
-                <TableCell align="right" sx={{ position: 'sticky', top: 0, bgcolor: 'background.paper' }}>
-                  Actions
-                </TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {data.length > 0 ? (
-                data.map((item) => (
-                  <TableRow key={item.id} hover>
-                    {fields.map((field) => (
-                      <TableCell key={field}>{item[field]}</TableCell>
-                    ))}
-                    <TableCell align="right">
-                      <IconButton
-                        color="primary"
-                        onClick={() => {
-                          setEditingItem(item);
-                          setIsEditDialogOpen(true);
-                        }}
-                      >
-                        <EditIcon />
-                      </IconButton>
-                      <IconButton
-                        color="error"
-                        onClick={() => {
-                          setSelectedId(item.id);
-                          setIsDeleteDialogOpen(true);
-                        }}
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={fields.length + 1} align="center">
-                    <Typography
-                      className="cursor-pointer"
-                      onClick={() => {
-                        navigate('/Main');
-                      }}
-                    >
-                      No data available. Click here to redirect to Main.
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Box>
+  const themeStyles = {
+    dark: {
+      backgroundColor: '#1e1e1e',
+      textColor: '#d4d4d4',
+      paperBackground: '#252526',
+      buttonColor: '#569cd6',
+      buttonHoverColor: '#3c6d9e',
+      errorColor: '#ff4444',
+      tableHeaderColor: '#333333',
+      tableBorderColor: '#555555',
+      border: '1px solid #f8f8f8',
+      borderRadius: '5px',
+      boxShadow: '0px 0px 10px rgba(0, 0, 0, 0.2)',
+    },
+    light: {
+      backgroundColor: '#ffffff',
+      textColor: '#000000',
+      paperBackground: '#f5f5f5',
+      buttonColor: '#1976d2',
+      buttonHoverColor: '#115293',
+      errorColor: '#d32f2f',
+      tableHeaderColor: '#f0f0f0',
+      tableBorderColor: '#dddddd',
+      border: '1px solid #dddddd',
+      borderRadius: '5px',
+      boxShadow: '0px 0px 10px rgba(0, 0, 0, 0.1)',
+    },
+  };
+  
+  const currentTheme = settings.theme === 'dark' ? themeStyles.dark : themeStyles.light;
+
+  const handleOpenDownloadDialog = () => {
+    setIsDownloadDialogOpen(true);
+  };
+
+  const handleEditClick = (item) => {
+    if (item === null) {
+      // Add new item
+      // setNewItem({});
+      setIsAddDialogOpen(true);
+    } else {
+      // Edit existing item
+      setEditingItem(item);
+      setIsEditDialogOpen(true);
+    }
+  };
+
+  const handleDeleteClick = (id) => {
+    setSelectedId(id);
+    setIsDeleteDialogOpen(true);
+  };
+
+  return (
+    <Box sx={{ p: 2 }}>
+      {/* Data Table Component */}
+      <DataTable 
+        data={data}
+        setData={setData}
+        fields={fields}
+        columns={columns}
+        collectionName={collectionName}
+        currentTheme={currentTheme}
+        canCreate={canCreate}
+        canRead={canRead}
+        canUpdate={canUpdate}
+        canDelete={canDelete}
+        onEdit={handleEditClick}
+        onDelete={handleDeleteClick}
+        onOpenDownloadDialog={handleOpenDownloadDialog}
+        navigate={navigate}
+        startDateV={startDateV}
+        setStartDateV={setStartDateV}
+        endDateV={endDateV}
+        setEndDateV={setEndDateV}
+        fetchCollections={fetchCollections}
+        settings={settings} 
+      />
 
       {/* Download Dialog */}
       <Dialog open={isDownloadDialogOpen} onClose={() => setIsDownloadDialogOpen(false)} maxWidth="sm" fullWidth>
@@ -291,75 +867,42 @@ function C({ colletionsData }) {
         <DialogActions>
           <Button onClick={() => setIsDownloadDialogOpen(false)}>Cancel</Button>
           <Button onClick={downloadCSV} variant="contained" color="primary">
-            Download CSV
+            CSV
           </Button>
           <Button onClick={downloadPDF} variant="contained" color="secondary">
-            Download PDF
+            PDF
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Add Dialog */}
-      <Dialog open={isAddDialogOpen} onClose={() => setIsAddDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add New Item</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            {fields.map((field) => (
-              <TextField
-                key={field}
-                label={field.charAt(0).toUpperCase() + field.slice(1)}
-                fullWidth
-                margin="normal"
-                value={newItem[field] || ''}
-                onChange={(e) =>
-                  setNewItem((prev) => ({
-                    ...prev,
-                    [field]: e.target.value,
-                  }))
-                }
-              />
-            ))}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleAdd} variant="contained">
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AddItemDialog
+        open={isAddDialogOpen}
+        onClose={() => setIsAddDialogOpen(false)}
+        fields={fields}
+        collectionName={collectionName}
+        formStructures={formStructures}
+        newItem={newItem}
+        setNewItem={setNewItem}
+        handleAdd={handleAdd} 
+        // Optional:
+        title={collectionName} // defaults to "Add New Item"
+      /> 
 
-      {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onClose={() => setIsEditDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit Item</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            {editingItem &&
-              fields.map((field) => (
-                <TextField
-                  key={field}
-                  label={field.charAt(0).toUpperCase() + field.slice(1)}
-                  fullWidth
-                  margin="normal"
-                  value={editingItem[field] || ''}
-                  onChange={(e) =>
-                    setEditingItem((prev) => ({
-                      ...prev,
-                      [field]: e.target.value,
-                    }))
-                  }
-                />
-              ))}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleUpdate} variant="contained">
-            Update
-          </Button>
-        </DialogActions>
-      </Dialog>
-
+      {/* Edit Dialog */} 
+      {/* <ErrorBoundary> */}
+        <EditItemDialog
+          open={isEditDialogOpen}
+          onClose={() => setIsEditDialogOpen(false)}
+          editingItem={editingItem}
+          setEditingItem={setEditingItem}
+          fields={fields}
+          handleUpdate={handleUpdate}
+          formStructures={formStructures[collectionName]} // Pass only the relevant structure
+          collectionName={collectionName}
+          title={editingItem?.rakeNo || editingItem?.Vessel_name || 'Edit Item'} // Safe title access
+        />
+      {/* </ErrorBoundary> */}
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onClose={() => setIsDeleteDialogOpen(false)}>
         <DialogTitle>Confirm Delete</DialogTitle>
@@ -379,7 +922,7 @@ function C({ colletionsData }) {
         open={snackbar.open}
         autoHideDuration={6000}
         onClose={() => setSnackbar({ ...snackbar, open: false })}
-       >
+      >
         <Alert
           onClose={() => setSnackbar({ ...snackbar, open: false })}
           severity={snackbar.severity}
@@ -387,8 +930,7 @@ function C({ colletionsData }) {
         >
           {snackbar.message}
         </Alert>
-      </Snackbar>           
-
+      </Snackbar>
     </Box>
   );
 }
@@ -396,588 +938,639 @@ function C({ colletionsData }) {
 export default C;
 
 
+import React, { useState, useEffect } from 'react';
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Box, TextField, Button, Typography, IconButton,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
+  Card, Chip, Divider, useMediaQuery
+} from '@mui/material';
+import { 
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  Save as SaveIcon, 
+} from '@mui/icons-material';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import { createTheme, ThemeProvider } from '@mui/material/styles';
 
-
-import React, { useState } from 'react'; 
-import { useNavigate } from "react-router-dom";
-import BackButton from './shortComponents/BackButton';
-
-const Layout = ( { content }) => {
-  const navigate = useNavigate();
-  const [displayContent, setDisplayContent] = useState( content )
-  
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    const storedValue = localStorage.getItem('isSidebarOpen');
-    return storedValue === 'true';
-  });
-
-  // Add this line to the button's onClick event
-  localStorage.setItem('isSidebarOpen', !isSidebarOpen);
-  
-  // Mock menu items
-  const menuItems = [
-    { icon: '🏠', label: 'Main' },
-    { icon: '🔍', label: 'Search' },
-    { icon: '🔔', label: 'Notifications' },
-    { icon: '⚙️', label: 'Settings' },
-    { icon: '❓', label: 'Help' }
-  ];
-
-  const serchEngine = () =>{
-    console.log( displayContent.props )
-  }
-
-
-  return (
-    <div className="flex h-screen bg-gray-100">
-      {/* Sidebar */}
-      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-white border-r transition-all duration-300 flex flex-col`}>
-        {/* Sidebar Header */}
-        <div className="h-16 border-b flex items-center justify-between px-4">
-          {isSidebarOpen && <h1 className="font-bold text-xl">Dashboard</h1>}
-          <button 
-            onClick={() => {
-              setIsSidebarOpen(!isSidebarOpen);
-              localStorage.setItem('isSidebarOpen', !isSidebarOpen);
-            }}
-            className="p-2 hover:bg-gray-100 rounded-lg"
-          >
-            {isSidebarOpen ? '◀️' : '▶️'}
-          </button>
-        </div>
-
-        {/* Navigation Menu */}
-        <nav className="flex-1 pt-4">
-          {menuItems.map((item, index) => (
-            <button
-              key={index}
-              className={`w-full flex items-center px-4 py-3 hover:bg-gray-100 ${
-                isSidebarOpen ? 'justify-start' : 'justify-center'
-              }`}
-              onClick={()=>{ navigate(`/${item.label}`) }}
-            >
-              <span className="text-xl">{item.icon}</span>
-              {isSidebarOpen && (
-                <span className="ml-3">{item.label}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-
-        {/* Sidebar Footer */}
-        <div className="border-t p-4">
-          <button className={`w-full flex items-center hover:bg-gray-100 p-2 rounded ${
-            isSidebarOpen ? 'justify-start' : 'justify-center'
-          }`}>
-            <span className="text-xl">👤</span>
-            {isSidebarOpen && <span className="ml-3">Logout</span>}
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Navigation */}
-        <header className="h-16 bg-white border-b flex items-center justify-between px-6">
-          <div className="flex items-center w-full">
-            <BackButton/> 
-            <input
-              type="search"
-              placeholder="Search..."
-              className="w-full py-2 border rounded-lg focus:outline-none focus:border-blue-900"
-              onChange={serchEngine}
-            />
-          </div>
-          <div className="flex items-center gap-4">
-            <button className="p-2 hover:bg-gray-100 rounded-lg">🔔</button>
-            <button className="p-2 hover:bg-gray-100 rounded-lg">👤</button>
-          </div>
-        </header>
-
-        {/* Main Content Area */}
-        <main className="flex overflow-auto p-6">
-          <div className="w-full">
-            {/* work space */} 
-            { displayContent }
-          </div>
-        </main>
-      </div>
-    </div>
-  );
-};
-
-export default Layout;
-
-
-
-const pathsToSearch = [
-        '1-1', '1-2', '1-3', '1-4', '1-5', '1-6', '1-7', '1-8', '1-9', '1-10',
-        '2-1', '2-2', '2-3', '2-4', '2-5', '2-6', '2-7', '2-8', '2-9', '2-10'
-    ];  
-
-
-import * as React from 'react';
-import { useState, useEffect } from 'react';
-import Stack from '@mui/material/Stack';
-import FormControl from '@mui/material/FormControl';
-import FormLabel from '@mui/material/FormLabel';
-import RadioGroup from '@mui/material/RadioGroup';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Radio from '@mui/material/Radio';
-import { BarChart } from '@mui/x-charts/BarChart';
-import { axisClasses } from '@mui/x-charts/ChartsAxis';
-import { getFirestore, collection, getDocs } from 'firebase/firestore';
-import { app } from '../firebase-config';
-
-function TickParamsSelector({
-  tickPlacement,
-  tickLabelPlacement,
-  setTickPlacement,
-  setTickLabelPlacement,
-}) {
-  return (
-    <Stack direction="column" spacing={2} sx={{ width: '100%', mb: 2 }}>
-      <FormControl>
-        <FormLabel id="tick-placement-radio-buttons-group-label">
-          Tick Placement
-        </FormLabel>
-        <RadioGroup
-          row
-          aria-labelledby="tick-placement-radio-buttons-group-label"
-          name="tick-placement"
-          value={tickPlacement}
-          onChange={(event) => setTickPlacement(event.target.value)}
-        >
-          <FormControlLabel value="start" control={<Radio />} label="start" />
-          <FormControlLabel value="end" control={<Radio />} label="end" />
-          <FormControlLabel value="middle" control={<Radio />} label="middle" />
-          <FormControlLabel
-            value="extremities"
-            control={<Radio />}
-            label="extremities"
-          />
-        </RadioGroup>
-      </FormControl>
-      <FormControl>
-        <FormLabel id="label-placement-radio-buttons-group-label">
-          Label Placement
-        </FormLabel>
-        <RadioGroup
-          row
-          aria-labelledby="label-placement-radio-buttons-group-label"
-          name="label-placement"
-          value={tickLabelPlacement}
-          onChange={(event) => setTickLabelPlacement(event.target.value)}
-        >
-          <FormControlLabel value="tick" control={<Radio />} label="tick" />
-          <FormControlLabel value="middle" control={<Radio />} label="middle" />
-        </RadioGroup>
-      </FormControl>
-    </Stack>
-  );
-}
-
-const chartSetting = {
-  yAxis: [
-    { 
-      label: 'Quantity (Imported - Exported)',
-      min: 0 // Set minimum value to 0 or adjust as needed
-    }
-  ],
-  width: 800, // Add fixed width
-  height: 400, // Increased height for better visibility
-  margin: { top: 20, right: 30, bottom: 50, left: 60 }, // Add margins
-  sx: {
-    [`& .${axisClasses.directionY} .${axisClasses.label}`]: {
-      transform: 'translateX(-20px)',
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+    primary: {
+      main: '#90caf9',
+    },
+    secondary: {
+      main: '#f48fb1',
+    },
+    background: {
+      paper: '#424242',
+      default: '#303030',
     },
   },
-};
+  typography: {
+    fontSize: 12,
+  },
+});
 
-function MaterialQuantityChart() {
-  const [tickPlacement, setTickPlacement] = useState('middle');
-  const [tickLabelPlacement, setTickLabelPlacement] = useState('middle');
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [chartData, setChartData] = useState([]);
-  const db = getFirestore(app);
-
-  useEffect(() => {
-    async function fetchData() {
-      setIsLoading(true);
-      try {
-        // Fetch vessel data
-        const vesselSnapshot = await getDocs(collection(db, 'vessel_data'));
-        const vesselData = vesselSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-
-        // Fetch reclamation data
-        const reclamationSnapshot = await getDocs(collection(db, 'reclamationData'));
-        const reclamationData = reclamationSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-
-        // Process the data
-        const materialQuantities = {};
-
-        // Process vessel data (imports)
-        vesselData.forEach(vessel => {
-          if (!vessel.material || !vessel.quantity) return;
-          
-          const material = Array.isArray(vessel.material) 
-            ? vessel.material[0] 
-            : vessel.material;
-
-          if (!materialQuantities[material]) {
-            materialQuantities[material] = {
-              material,
-              imported: 0,
-              exported: 0,
-              paths: new Set()
-            };
-          }
-
-          const quantity = parseInt(vessel.quantity, 10);
-          if (!isNaN(quantity)) {
-            materialQuantities[material].imported += quantity;
-          }
-
-          if (vessel.path) {
-            const paths = Array.isArray(vessel.path) ? vessel.path : [vessel.path];
-            paths.forEach(path => materialQuantities[material].paths.add(path));
-          }
-        });
-
-        // Process reclamation data (exports)
-        reclamationData.forEach(reclamation => {
-          if (!reclamation.typeOfMaterial || !reclamation.totalTon) return;
-
-          const material = Array.isArray(reclamation.typeOfMaterial)
-            ? reclamation.typeOfMaterial[0]
-            : reclamation.typeOfMaterial;
-
-          if (!materialQuantities[material]) {
-            materialQuantities[material] = {
-              material,
-              imported: 0,
-              exported: 0,
-              paths: new Set()
-            };
-          }
-
-          const quantity = parseInt(reclamation.totalTon, 10);
-          if (!isNaN(quantity)) {
-            materialQuantities[material].exported += quantity;
-          }
-        });
-
-        // Transform data for chart
-        const processedData = Object.values(materialQuantities).map(item => ({
-          material: item.material,
-          quantity: Math.max(0, item.imported - item.exported), // Ensure non-negative
-          paths: Array.from(item.paths)
-        }));
-
-        // Sort by quantity for better visualization
-        processedData.sort((a, b) => b.quantity - a.quantity);
-
-        setChartData(processedData);
-        setIsLoading(false);
-      } catch (err) {
-        console.error('Error fetching data:', err);
-        setError('Failed to load data');
-        setIsLoading(false);
-      }
-    }
-
-    fetchData();
-  }, [db]);
-
-  const handleBarHover = (event, barData) => {
-    if (!barData) return;
-    
-    const dataPoint = chartData[barData.dataIndex];
-    if (dataPoint) {
-      const paths = dataPoint.paths.join(', ') || 'No paths available';
-      alert(
-        `Material: ${dataPoint.material}\n` +
-        `Quantity: ${dataPoint.quantity}\n` +
-        `Paths: ${paths}`
-      );
-    }
-  };
-
-  if (isLoading) return <div>Loading chart data...</div>;
-  if (error) return <div>Error: {error}</div>;
-  if (!chartData.length) return <div>No data available</div>;
-
-  return (
-    <Stack spacing={2} sx={{ width: '100%', p: 2 }}>
-      <TickParamsSelector
-        tickPlacement={tickPlacement}
-        tickLabelPlacement={tickLabelPlacement}
-        setTickPlacement={setTickPlacement}
-        setTickLabelPlacement={setTickLabelPlacement}
-      />
-      <BarChart
-        dataset={chartData}
-        xAxis={[{
-          scaleType: 'band',
-          dataKey: 'material',
-          tickPlacement,
-          tickLabelPlacement,
-          label: 'Materials'
-        }]}
-        series={[{
-          dataKey: 'quantity',
-          label: 'Net Quantity',
-          valueFormatter: (value) => `${value.toLocaleString()} units`
-        }]}
-        {...chartSetting}
-        onBarHover={handleBarHover}
-      />
-    </Stack>
-  );
-}
-
-export default MaterialQuantityChart;
-
-
-
-import React, { useEffect, useState } from 'react'; 
-import { useNavigate } from "react-router-dom";
-import BackButton from './shortComponents/BackButton';
-import Profil from './shortComponents/Profil';
-
-const Layout = ({ content, settings }) => {
-  const navigate = useNavigate();
-  const [displayContent, setDisplayContent] = useState(content);
+const AddItemDialog = ({
+  open,
+  onClose,
+  fields,
+  collectionName,
+  formStructures,
+  newItem,
+  setNewItem,
+  handleAdd,
+  title = "Add New Item",
+}) => {
+  const isMobile = useMediaQuery('(max-width:600px)');
   
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    const storedValue = localStorage.getItem('isSidebarOpen');
-    return storedValue === 'true';
+  const [delays, setDelays] = useState([]);
+  const [currentDelay, setCurrentDelay] = useState({
+    from: '',
+    to: '',
+    reason: '',
+    total: ''
   });
+  const [editMode, setEditMode] = useState({});
+  const [editingDelayIndex, setEditingDelayIndex] = useState(null);
 
-  // Popup states
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  
-  // Mock menu items
-  const menuItems = [
-    { icon: '🏠', label: 'Main' },
-    { icon: '🔍', label: 'Search' },
-    { icon: '🔔', label: 'Notifications' },
-    { icon: '⚙️', label: 'Settings' },
-    { icon: '❓', label: 'Help' }
-  ];
+  // Time calculation utilities
+  // Convert HH:MM to minutes
+  const timeToMinutes = (timeStr) => {
+    if (!timeStr) return 0;
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
 
-  function filterCollections(data, searchKeyword) {
-    // Helper function to recursively filter data
-    function filterData(data, searchKeyword) {
-        if (Array.isArray(data)) {
-            // If data is an array, filter each element and keep the array structure
-            const filteredArray = data
-                .map(item => filterData(item, searchKeyword))
-                .filter(item => item !== undefined && item !== null);
-            return filteredArray.length > 0 ? filteredArray : undefined;
-        } else if (typeof data === 'object' && data !== null) {
-            // If data is an object, filter each key-value pair and keep the object structure
-            const filteredObject = {};
-            for (const key in data) {
-                if (data.hasOwnProperty(key)) {
-                    const filteredValue = filterData(data[key], searchKeyword);
-                    if (filteredValue !== undefined && filteredValue !== null) {
-                        filteredObject[key] = filteredValue;
-                    }
-                }
-            }
-            return Object.keys(filteredObject).length > 0 ? filteredObject : undefined;
-        } else if (typeof data === 'function') {
-            // If data is a function, keep it as is
-            return data;
-        } else {
-            // If data is a primitive (string, number, boolean), check if it matches the searchKeyword
-            if (String(data).toLowerCase().includes(searchKeyword.toLowerCase())) {
-                return data;
-            }
-            return undefined;
-        }
-    }
+  // Convert minutes to HH:MM
+  const minutesToTime = (totalMinutes) => {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = Math.floor(totalMinutes % 60);
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+  };
 
-    // Start filtering from the root level
-    const filteredData = filterData(data, searchKeyword);
+  const calculateTimeDifference = (start, end) => {
+    if (!start || !end) return '00:00';
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const totalMins = (endDate - startDate) / (1000 * 60);
+    if (totalMins < 0) return '00:00';
+    return minutesToTime(totalMins);
+  };
 
-    // Return the filtered data in the same format and type as the input
-    return filteredData !== undefined ? filteredData : data;
-  }
+  // Calculate sum of all delay durations
+  const calculateTotalDelays = () => {
+    return delays.reduce((total, delay) => {
+      return total + timeToMinutes(delay.total);
+    }, 0);
+  };
  
-  const searchEngine = (p) => {
-    const data = content.props;
-    const target = p.target.value.trim();
-    const result = filterCollections(data, target);
-    console.log(data, target, result); 
+  // Handle all automatic calculations
+  useEffect(() => {
+    const updatedItem = { ...newItem };
+  
+    if (collectionName === 'reclamationData') {
+      // Calculate WL Loaded
+      const wlLoaded = Math.max(0, 
+        (parseFloat(updatedItem.wlPlaced) || 0) - 
+        (parseFloat(updatedItem.manualLoaded) || 0) - 
+        (parseFloat(updatedItem.numberOfSick) || 0));
+      updatedItem.wlLoaded = wlLoaded;
+  
+      // Calculate Average
+      updatedItem.average = wlLoaded > 0 
+        ? ((parseFloat(updatedItem.totalTon) || 0) / wlLoaded).toFixed(2)
+        : '0.00';
+  
+      // Calculate Reclamation Total Time (startTime to stopTime)
+      if (updatedItem.startTime && updatedItem.stopTime) {
+        updatedItem.totalTime = calculateTimeDifference(
+          updatedItem.startTime,
+          updatedItem.stopTime
+        );
+      }
+  
+      // Calculate Actual Time (totalTime - sum of all delays)
+      if (updatedItem.totalTime) {
+        const totalTimeMins = timeToMinutes(updatedItem.totalTime);
+        const totalDelaysMins = calculateTotalDelays();
+        const actualTimeMins = Math.max(0, totalTimeMins - totalDelaysMins);
+        updatedItem.actualTime = minutesToTime(actualTimeMins);
+      }
+    }
+  
+    // Vessel data calculations
+    if (collectionName === 'vessel_data') {
+      // Calculate Vessel Total Time (conv_start to completion_time)
+      if (updatedItem.conv_start && updatedItem.completion_time) {
+        updatedItem.total_time = calculateTimeDifference(
+          updatedItem.conv_start,
+          updatedItem.completion_time
+        );
+      }
+  
+      // Calculate Berthing to Completion Time (optional - if you want both)
+      // if (updatedItem.berthing_time && updatedItem.completion_time) {
+      //   updatedItem.berthing_to_completion_time = calculateTimeDifference(
+      //     updatedItem.berthing_time,
+      //     updatedItem.completion_time
+      //   );
+      // }
+    }
+  
+    setNewItem(updatedItem);
+  }, [newItem, delays, collectionName]);
 
-    setDisplayContent((prevDisplayContent) => ({
-      ...prevDisplayContent, // Copy existing state
-      props: result, // Update the props field with the filtered result
-    }));
+  const handleFieldChange = (field, value) => {
+    setNewItem(prev => ({ ...prev, [field]: value }));
   };
 
-  // Handle logout action
-  const handleLogout = () => {
-    // Implement actual logout logic here
-    console.log("Logging out...");
-    setIsLogoutModalOpen(false);
-    // Navigate to login page or perform other logout actions
-    // navigate('/login');
-  };
-
-  useEffect(() => {
-    setDisplayContent(content);
-  }, [content]);
-
-  // Close modals when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      const logoutModal = document.getElementById("logout-modal");
-      const profileModal = document.getElementById("profile-modal");
-      
-      if (logoutModal && !logoutModal.contains(event.target) && 
-          !event.target.classList.contains("logout-trigger")) {
-        setIsLogoutModalOpen(false);
-      }
-      
-      if (profileModal && !profileModal.contains(event.target) && 
-          !event.target.classList.contains("profile-trigger")) {
-        setIsProfileModalOpen(false);
-      }
+  const handleDelayChange = (field, value) => {
+    const updatedDelay = {
+      ...currentDelay,
+      [field]: value
     };
     
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    if ((field === 'from' || field === 'to') && updatedDelay.from && updatedDelay.to) {
+      updatedDelay.total = calculateTimeDifference(updatedDelay.from, updatedDelay.to);
+    }
+    
+    setCurrentDelay(updatedDelay);
+  };
 
+  const addDelay = () => {
+    if (currentDelay.from && currentDelay.to && currentDelay.reason) {
+      const newDelays = editingDelayIndex !== null
+        ? delays.map((delay, i) => i === editingDelayIndex ? currentDelay : delay)
+        : [...delays, currentDelay];
+      
+      setDelays(newDelays);
+      setNewItem(prev => ({ ...prev, delays: newDelays }));
+      setCurrentDelay({ from: '', to: '', reason: '', total: '' });
+      setEditingDelayIndex(null);
+    }
+  };
+
+  const removeDelay = (index) => {
+    const newDelays = delays.filter((_, i) => i !== index);
+    setDelays(newDelays);
+    setNewItem(prev => ({ ...prev, delays: newDelays }));
+  };
+
+  const editDelay = (index) => {
+    setCurrentDelay(delays[index]);
+    setEditingDelayIndex(index);
+  };
+
+  const toggleEditMode = (field) => {
+    setEditMode(prev => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const renderField = (field) => {
+    const fieldConfig = formStructures?.[collectionName]?.[field] || {
+      type: 'text',
+      label: field.charAt(0).toUpperCase() + field.slice(1),
+      required: false
+    };
+
+    const fieldValue = newItem?.[field] ?? '';
+
+    if (editMode[field]) {
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TextField
+            required={fieldConfig.required}
+            type={fieldConfig.type || 'text'}
+            label={fieldConfig.label}
+            fullWidth
+            size="small"
+            multiline={fieldConfig.type === 'textarea'}
+            rows={fieldConfig.type === 'textarea' ? 3 : 1}
+            InputLabelProps={
+              fieldConfig.type === 'datetime-local' || fieldConfig.type === 'date' 
+                ? { shrink: true } 
+                : {}
+            }
+            value={fieldValue}
+            onChange={(e) => handleFieldChange(field, e.target.value)}
+            autoFocus
+          />
+          <IconButton size="small" onClick={() => toggleEditMode(field)}>
+            <SaveIcon fontSize="small" color="primary" />
+          </IconButton>
+        </Box>
+      );
+    }
+
+    return (
+      <Box 
+        sx={{ 
+          py: 1,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: 'pointer',
+          '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.04)' }
+        }}
+        onClick={() => toggleEditMode(field)}
+      >
+        <Box>
+          <Typography variant="caption" color="textSecondary">
+            {fieldConfig.label}
+          </Typography>
+          <Typography 
+            variant="body1" 
+            sx={{ 
+              wordBreak: 'break-word',
+              whiteSpace: fieldConfig.type === 'textarea' ? 'pre-wrap' : 'normal',
+              color: ['average', 'wlLoaded', 'actualTime', 'total_time'].includes(field) 
+                ? 'primary.main' 
+                : 'inherit'
+            }}
+          >
+            {fieldValue } 
+            {/* fieldValue || '—' */}
+          </Typography>
+        </Box>
+        <IconButton size="small">
+          {/* <EditIcon fontSize="small" /> */}
+        </IconButton>
+      </Box>
+    );
+  };
 
   return (
-    <div className="flex h-screen ">
-      {/* Sidebar */}
-      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'}  border-r transition-all duration-300 flex flex-col`}>
-        {/* Sidebar Header */}
-        <div className="h-16 border-b flex items-center justify-between px-4">
-          {isSidebarOpen && <h1 className="font-bold text-xl">Dashboard</h1>}
-          <button 
-            onClick={() => {
-              setIsSidebarOpen(!isSidebarOpen);
-              localStorage.setItem('isSidebarOpen', !isSidebarOpen);
-            }}
-            className="p-2 hover:bg-gray-100 rounded-lg"
-          >
-            {isSidebarOpen ? '◀️' : '▶️'}
-          </button>
-        </div>
+    <ThemeProvider theme={darkTheme}>
+      <Dialog 
+        open={open} 
+        onClose={onClose} 
+        maxWidth="md" 
+        fullWidth
+        fullScreen={isMobile}
+      >
+        <DialogTitle sx={{ 
+          bgcolor: 'primary.dark',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          py: 1,
+          px: 2
+        }}>
+          <Typography variant="subtitle1" component="div">{title}</Typography>
+        </DialogTitle>
+        <DialogContent sx={{ p: isMobile ? 0.5 : 2 }}>
+          <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Card elevation={1}>
+              <Box sx={{ p: 1 }}>
+                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                  General Information
+                </Typography>
+                <Divider sx={{ mb: 1 }} />
+                <Box sx={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fill, minmax(250px, 1fr))',
+                  gap: 1 
+                }}>
+                  {fields.filter(f => f !== 'delays').map((field) => (
+                    <Box key={field} sx={{ p: 0.5 }}>
+                      {renderField(field)}
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            </Card>
 
-        {/* Navigation Menu */}
-        <nav className="flex-1 pt-4">
-          {menuItems.map((item, index) => (
-            <button
-              key={index}
-              className={`w-full flex items-center px-4 py-3 hover:bg-gray-100 ${
-                isSidebarOpen ? 'justify-start' : 'justify-center'
-              }`}
-              onClick={() => { navigate(`/${item.label}`) }}
-            >
-              <span className="text-xl">{item.icon}</span>
-              {isSidebarOpen && (
-                <span className="ml-3">{item.label}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-
-        {/* Sidebar Footer */}
-        <div className="border-t p-4">
-          <button 
-            className={`w-full flex items-center hover:bg-gray-100 p-2 rounded ${
-              isSidebarOpen ? 'justify-start' : 'justify-center'
-            } logout-trigger`}
-            onClick={() => setIsLogoutModalOpen(true)}
-          >
-            <span className="text-xl">👤</span>
-            {isSidebarOpen && <span className="ml-3">Logout</span>}
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Navigation */}
-        <header className="h-16  border-b flex items-center justify-between  px-4 py-3">
-          <div className="flex items-center w-full">
-            <BackButton/> 
-            <input
-              type="search"
-              placeholder="Search..." 
-              className={`${settings.theme === 'dark' ? 'bg-gray-900 text-gray-300' : 'bg-gray-50 text-gray-800'} w-full py-2 border rounded-lg focus:outline-none focus:border-blue-900`}
-              onChange={searchEngine}
-            />
-          </div>
-          <div className="flex items-center gap-4">
-            {/* <button className="p-2 hover:bg-gray-100 rounded-lg">🔔</button> */}
-            <button 
-              className="p-2 hover:bg-gray-100 rounded-lg profile-trigger"
-              onClick={() => setIsProfileModalOpen(true)}
-            >
-              👤
-            </button>
-          </div>
-        </header>
-
-        {/* Main Content Area */}
-        <main className="flex overflow-auto p-0">
-          <div className="w-full">
-            {/* work space */} 
-            {displayContent}
-          </div>
-        </main>
-      </div>
-
-      {/* Logout Modal */}
-      {isLogoutModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div id="logout-modal" className=" rounded-lg shadow-xl w-96 overflow-hidden">
-            <div className="bg-red-50 p-4 border-b border-red-100">
-              <h2 className="text-xl font-semibold text-red-700">Confirm Logout</h2>
-            </div>
-            <div className="p-6">
-              <p className="mb-4">Are you sure you want to logout from your account?</p>
-              <p className="text-sm text-gray-500 mb-6">You will need to enter your credentials again to access the dashboard.</p>
-              
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setIsLogoutModalOpen(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-                >
-                  Logout
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Profile Modal */}
-      {isProfileModalOpen && ( <Profil modal={setIsProfileModalOpen}/>  )}
-    </div>
+            {fields.includes('delays') && (
+              <Card elevation={1}>
+                <Box sx={{ p: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <AccessTimeIcon color="primary" fontSize="small" />
+                      <Typography variant="subtitle2" fontWeight="bold">Delays</Typography>
+                    </Box>
+                    <Chip label={`${delays.length} records`} size="small" color="primary" variant="outlined" />
+                  </Box>
+                  <Divider sx={{ mb: 1 }} />
+                  
+                  <Box sx={{ 
+                    display: 'flex', 
+                    flexDirection: isMobile ? 'column' : 'row',
+                    gap: 1, 
+                    alignItems: isMobile ? 'stretch' : 'center', 
+                    mb: 1,
+                    p: 1,
+                    borderRadius: 1,
+                    bgcolor: 'background.default'
+                  }}>
+                    <TextField
+                      type="datetime-local"
+                      label="From"
+                      size="small"
+                      value={currentDelay.from}
+                      onChange={(e) => handleDelayChange('from', e.target.value)}
+                      InputLabelProps={{ shrink: true }}
+                      sx={{ flex: 1 }}
+                    />
+                    <TextField
+                      type="datetime-local"
+                      label="To"
+                      size="small"
+                      value={currentDelay.to}
+                      onChange={(e) => handleDelayChange('to', e.target.value)}
+                      InputLabelProps={{ shrink: true }}
+                      sx={{ flex: 1 }}
+                    />
+                    <TextField
+                      label="Reason"
+                      size="small"
+                      value={currentDelay.reason}
+                      onChange={(e) => handleDelayChange('reason', e.target.value)}
+                      sx={{ flex: isMobile ? 1 : 2 }}
+                    />
+                    <TextField
+                      label="Duration"
+                      size="small"
+                      value={currentDelay.total}
+                      InputProps={{ readOnly: true }}
+                      sx={{ flex: isMobile ? 1 : 0.5 }}
+                    />
+                    <Button 
+                      variant="contained" 
+                      startIcon={<AddIcon />}
+                      onClick={addDelay}
+                      fullWidth={isMobile}
+                      size="small"
+                    >
+                      {editingDelayIndex !== null ? 'Update' : 'Add'}
+                    </Button>
+                  </Box>
+                  
+                  {delays.length > 0 ? (
+                    <TableContainer component={Paper} sx={{ mb: 1, maxHeight: 250, overflowY: 'auto' }}>
+                      <Table size="small" stickyHeader>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 'bold' }}>From</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>To</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>Duration</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>Reason</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 'bold' }}>Action</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {delays.map((delay, index) => (
+                            <TableRow key={index} hover>
+                              <TableCell>{new Date(delay.from).toLocaleString()}</TableCell>
+                              <TableCell>{new Date(delay.to).toLocaleString()}</TableCell>
+                              <TableCell>
+                                <Chip label={delay.total} size="small" color="primary" variant="outlined" />
+                              </TableCell>
+                              <TableCell sx={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {delay.reason}
+                              </TableCell>
+                              <TableCell align="center">
+                                <IconButton size="small" onClick={() => editDelay(index)} color="primary">
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                                <IconButton size="small" onClick={() => removeDelay(index)} color="error">
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  ) : (
+                    <Box sx={{ textAlign: 'center', py: 2, borderRadius: 1 }}>
+                      <Typography variant="caption" color="textSecondary">No delays recorded</Typography>
+                    </Box>
+                  )}
+                </Box>
+              </Card>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 2, py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Button onClick={onClose} variant="outlined" size="small">Cancel</Button>
+          <Button onClick={handleAdd} variant="contained" size="small" startIcon={<SaveIcon />}>Save</Button>
+        </DialogActions>
+      </Dialog>
+    </ThemeProvider>
   );
 };
 
-export default Layout;
+export default AddItemDialog;
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Box, TextField, Button, Typography, IconButton,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
+  Card, Chip, Divider, useMediaQuery, Tooltip, TextareaAutosize
+} from '@mui/material'; 
+import { 
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  Save as SaveIcon, 
+} from '@mui/icons-material';
+
+const EditItemDialog = ({
+  open,
+  onClose,
+  editingItem,
+  setEditingItem,
+  fields,
+  handleUpdate,
+  formStructures,
+  title = "Edit Item"
+}) => {
+  const isMobile = useMediaQuery('(max-width:600px)');
+  const inputRefs = useRef({});
+  
+  const [delays, setDelays] = useState(editingItem?.delays || []);
+  const [currentDelay, setCurrentDelay] = useState({ from: '', to: '', reason: '', total: '' });
+  const [editingDelayIndex, setEditingDelayIndex] = useState(null);
+  const [totalDelayTime, setTotalDelayTime] = useState('00:00');
+
+  useEffect(() => {
+    if (editingItem?.delays) {
+      setDelays(editingItem.delays);
+      calculateTotalDelayTime(editingItem.delays);
+    }
+  }, [editingItem]);
+
+  const calculateTotalDelayTime = (delayList) => {
+    const totalMinutes = delayList.reduce((total, delay) => {
+      const [hours, minutes] = delay.total.split(':').map(Number);
+      return total + (hours * 60) + minutes;
+    }, 0);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    setTotalDelayTime(`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`);
+  };
+
+  const calculateDuration = (from, to) => {
+    const totalMins = (new Date(to) - new Date(from)) / (1000 * 60);
+    return totalMins < 0 ? '00:00' : `${String(Math.floor(totalMins / 60)).padStart(2, '0')}:${String(totalMins % 60).padStart(2, '0')}`;
+  };
+
+  const handleDelayChange = (field, value) => {
+    const updatedDelay = { ...currentDelay, [field]: value };
+    if ((field === 'from' || field === 'to') && updatedDelay.from && updatedDelay.to) {
+      updatedDelay.total = calculateDuration(updatedDelay.from, updatedDelay.to);
+    }
+    setCurrentDelay(updatedDelay);
+  };
+
+  const addOrUpdateDelay = () => {
+    if (currentDelay.from && currentDelay.to && currentDelay.reason) {
+      const newDelays = editingDelayIndex !== null 
+        ? delays.map((delay, i) => (i === editingDelayIndex ? currentDelay : delay))
+        : [...delays, currentDelay];
+      setDelays(newDelays);
+      setEditingItem(prev => ({ ...prev, delays: newDelays }));
+      setCurrentDelay({ from: '', to: '', reason: '', total: '' });
+      setEditingDelayIndex(null);
+      calculateTotalDelayTime(newDelays);
+    }
+  };
+
+  const removeDelay = (index) => {
+    const newDelays = delays.filter((_, i) => i !== index);
+    setDelays(newDelays);
+    setEditingItem(prev => ({ ...prev, delays: newDelays }));
+    calculateTotalDelayTime(newDelays);
+  };
+
+  const editDelay = (index) => {
+    setCurrentDelay(delays[index]);
+    setEditingDelayIndex(index);
+  };
+
+  const renderField = (field) => {
+    const fieldConfig = formStructures?.[field] || { type: 'text', label: field.charAt(0).toUpperCase() + field.slice(1) };
+    const fieldValue = editingItem?.[field] || '';
+
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <TextField
+          required={fieldConfig.required}
+          type={fieldConfig.type}
+          label={fieldConfig.label}
+          fullWidth
+          size="small"
+          value={fieldValue}
+          onChange={(e) => setEditingItem(prev => ({ ...prev, 
+                      [field]: e.target.value }))
+          }
+        />
+        {/* <IconButton size="small" onClick={addOrUpdateDelay}>
+          <SaveIcon fontSize="small" color="primary" />
+        </IconButton> */}
+      </Box>
+    );
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth fullScreen={isMobile}>
+      <DialogTitle>{title}</DialogTitle>
+      <DialogContent>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Card>
+            <Box sx={{ p: 2 }}>
+              <Typography variant="subtitle2" fontWeight="bold">General Information</Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 1 }}>
+                {fields.filter(f => f !== 'delays').map(field => (
+                  <Box key={field}>{renderField(field)}</Box>
+                ))}
+              </Box>
+            </Box>
+          </Card>
+
+          <Card>
+            <Box sx={{ p: 2 }}>
+              <Typography variant="subtitle2" fontWeight="bold">Delays</Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                <TextField
+                  type="datetime-local"
+                  label="From"
+                  size="small"
+                  value={currentDelay.from}
+                  onChange={(e) => handleDelayChange('from', e.target.value)}
+                />
+                <TextField
+                  type="datetime-local"
+                  label="To"
+                  size="small"
+                  value={currentDelay.to}
+                  onChange={(e) => handleDelayChange('to', e.target.value)}
+                />
+                <TextField
+                  label="Reason"
+                  size="small"
+                  value={currentDelay.reason}
+                  onChange={(e) => handleDelayChange('reason', e.target.value)}
+                />
+                <TextField
+                  label="Duration"
+                  size="small"
+                  value={currentDelay.total}
+                  InputProps={{ readOnly: true }}
+                />
+                <Button variant="contained" onClick={addOrUpdateDelay}>
+                  {editingDelayIndex !== null ? 'Update' : 'Add'}
+                </Button>
+              </Box>
+
+              <TableContainer component={Paper}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>From</TableCell>
+                      <TableCell>To</TableCell>
+                      <TableCell>Duration</TableCell>
+                      <TableCell>Reason</TableCell>
+                      <TableCell>Action</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {delays.map((delay, index) => (
+                      <TableRow key={index}>
+                        <TableCell>{new Date(delay.from).toLocaleString()}</TableCell>
+                        <TableCell>{new Date(delay.to).toLocaleString()}</TableCell>
+                        <TableCell>{delay.total}</TableCell>
+                        <TableCell>{delay.reason}</TableCell>
+                        <TableCell>
+                          <IconButton onClick={() => editDelay(index)} color="primary">
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton onClick={() => removeDelay(index)} color="error">
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          </Card>
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={handleUpdate} color="primary">Update</Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+export default EditItemDialog;
+

@@ -42,7 +42,13 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
     
     // Convert object to CSV
     const headers = Object.keys(data).join(',');
-    const values = Object.values(data).join(',');
+    const values = Object.values(data).map(value => {
+        if (typeof value === 'object' && value !== null) {
+            return JSON.stringify(value).replace(/"/g, '""'); // Escape quotes for CSV
+        }
+        return String(value);
+    }).join(',');
+
     const csv = `${headers}\n${values}`;
     
     // Download as file
@@ -510,7 +516,7 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
               } catch (error) {
                 return (
                   <div className="flex items-center justify-center h-full">
-                    <p className="text-sm text-gray-500">Error displaying timeline</p>
+                    <p className="text-sm text-gray-500">Timeline data not available or invalid</p>
                   </div>
                 );
               }
@@ -624,6 +630,95 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
     </>
   );
 
+  // Helper to render a single detail row
+  const renderDetailRow = (label, value) => {
+    if (value === undefined || value === null || value === '') return null; // Don't render empty values
+
+    let displayValue = String(value);
+
+    // Special formatting for specific keys if needed, e.g., dates, paths
+    if (label.toLowerCase().includes('date') || label.toLowerCase().includes('time')) {
+        try {
+            const date = new Date(value);
+            if (!isNaN(date)) displayValue = date.toLocaleString();
+        } catch (e) { /* ignore */ }
+    } else if (label.toLowerCase().includes('path') && typeof value === 'string') {
+        displayValue = formatPath(value); // Assuming formatPath can handle general paths too
+    }
+    
+    return (
+      <div className="flex justify-between items-center bg-gray-50 p-4 rounded-lg">
+        <span className="font-medium text-gray-600 capitalize">{label.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ')}:</span>
+        <span className="text-gray-800 break-all text-right">{displayValue}</span>
+      </div>
+    );
+  };
+
+  // Render All Details Tab
+  const renderAllDetails = () => (
+    <div className={activeTab === 'all' ? 'block' : 'hidden print:block print:mt-6'}>
+      <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Primary details section */}
+        <div className="bg-blue-50 p-5 rounded-lg md:col-span-2">
+          <h3 className="text-lg font-semibold text-blue-800 mb-4">All Available Details</h3>
+          <div className="grid grid-cols-1 gap-4">
+            {Object.entries(data).map(([key, value]) => {
+              if (typeof value !== 'object' || value === null) {
+                return renderDetailRow(key, value);
+              }
+              return null; // Handle objects/arrays separately
+            })}
+          </div>
+        </div>
+
+        {/* Section for Arrays (like delays) and Nested Objects */}
+        {Object.entries(data).map(([key, value]) => {
+          if (typeof value === 'object' && value !== null) {
+            if (Array.isArray(value)) {
+              if (value.length > 0) {
+                // Special rendering for 'delays' array
+                if (key === 'delays') {
+                  return <div key={key} className="md:col-span-2">{renderDelays(value)}</div>;
+                }
+                // Generic rendering for other arrays of objects
+                return (
+                  <div key={key} className="bg-green-50 p-5 rounded-lg md:col-span-2">
+                    <h3 className="text-lg font-semibold text-green-800 mb-4 capitalize">{key.replace(/_/g, ' ')}</h3>
+                    <div className="space-y-3">
+                      {value.map((item, index) => (
+                        <div key={index} className="border-l-4 border-green-500 pl-3 py-1 bg-white p-2 rounded-md">
+                          {Object.entries(item).map(([subKey, subValue]) => (
+                            <div key={subKey} className="flex justify-between items-center text-sm">
+                              <span className="font-medium text-gray-700 capitalize">{subKey.replace(/_/g, ' ')}:</span>
+                              <span className="text-gray-800">{String(subValue)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+            } else {
+              // Rendering for nested objects (non-array, non-null)
+              return (
+                <div key={key} className="bg-purple-50 p-5 rounded-lg">
+                  <h3 className="text-lg font-semibold text-purple-800 mb-4 capitalize">{key.replace(/_/g, ' ')}</h3>
+                  <div className="grid grid-cols-1 gap-3">
+                    {Object.entries(value).map(([subKey, subValue]) => (
+                      renderDetailRow(subKey, subValue)
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+          }
+          return null;
+        })}
+      </div>
+    </div>
+  );
+  
   // Render Normal Report (for other data sources)
   const renderNormalReport = () => (
     <div className="p-6">
@@ -645,11 +740,21 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
 
   // Determine which report to render
   const renderReportContent = () => {
-    switch(reportType) {
+    switch(activeTab) {
       case 'rake':
         return renderRakeReport();
       case 'vessel':
         return renderVesselReport();
+      case 'general': // Fallback to general for normal or initial state
+        return reportType === 'rake' ? renderRakeReport() : 
+               reportType === 'vessel' ? renderVesselReport() : 
+               renderNormalReport();
+      case 'loading':
+        return reportType === 'rake' ? renderRakeReport() : renderVesselReport();
+      case 'time':
+        return renderRakeReport();
+      case 'all':
+        return renderAllDetails();
       default:
         return renderNormalReport();
     }
@@ -681,6 +786,12 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
             Time Analysis
           </button>
         )}
+        <button 
+          className={`py-3 px-4 font-medium ${activeTab === 'all' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => setActiveTab('all')}
+        >
+          All Details
+        </button>
       </div>
     );
   };
