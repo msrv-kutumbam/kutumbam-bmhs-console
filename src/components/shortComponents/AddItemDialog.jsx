@@ -1,400 +1,551 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Box, TextField, Button, Typography, IconButton,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-  Card, Chip, Divider, useMediaQuery
+  Card, Chip, Divider, useMediaQuery, Grid
 } from '@mui/material';
-import { 
+import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
-  Save as SaveIcon, 
+  Save as SaveIcon,
 } from '@mui/icons-material';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import EngineeringIcon from '@mui/icons-material/Engineering'; // For operators
+import WarehouseIcon from '@mui/icons-material/Warehouse'; // For WL/material
 import { createTheme, ThemeProvider } from '@mui/material/styles';
 
-const darkTheme = createTheme({
+// Light Theme
+const lightTheme = createTheme({
   palette: {
-    mode: 'dark',
+    mode: 'light',
     primary: {
-      main: '#90caf9',
+      main: '#1976d2', // Standard Material UI blue
     },
     secondary: {
-      main: '#f48fb1',
+      main: '#dc004e', // Standard Material UI pink
     },
     background: {
-      paper: '#424242',
-      default: '#303030',
+      paper: '#ffffff',
+      default: '#f4f6f8',
     },
-  },
-  typography: {
-    fontSize: 12,
+    text: {
+      primary: 'rgba(0, 0, 0, 0.87)',
+      secondary: 'rgba(0, 0, 0, 0.6)',
+    },
+    action: {
+      active: 'rgba(0, 0, 0, 0.54)',
+    },
+    success: { // For auto-validation status
+      main: '#4caf50',
+    },
+    info: { // For auto-validation status
+      main: '#2196f3',
+    },
+    warning: { // For delays
+      main: '#ff9800',
+    },
+    autofill: { // Custom color for auto-filled fields
+      main: '#e8f0fe', // Light blue for auto-filled background
+      text: 'rgba(0, 0, 0, 0.87)', // Standard text color
+    }
   },
 });
+
+// Helper function to format a Date object into YYYY-MM-DDTHH:mm for datetime-local input
+const formatDateTimeLocal = (date) => {
+  if (!date || isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+// Helper to convert HH:mm duration string to minutes
+const durationToMinutes = (duration) => {
+  if (!duration || typeof duration !== 'string') return 0;
+  const parts = duration.split(':');
+  if (parts.length === 2) {
+    const hours = parseInt(parts[0], 10);
+    const minutes = parseInt(parts[1], 10);
+    if (!isNaN(hours) && !isNaN(minutes)) {
+      return hours * 60 + minutes;
+    }
+  }
+  return 0;
+};
+
+// Helper to convert minutes to HH:mm duration string
+const minutesToDuration = (totalMinutes) => {
+  if (isNaN(totalMinutes) || totalMinutes < 0) return '00:00';
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+
 
 const AddItemDialog = ({
   open,
   onClose,
   fields,
   collectionName,
-  formStructures,
-  newItem,
-  setNewItem,
+  formStructures, // This now contains all form structures
   handleAdd,
-  title = "Add New Item",
+  title = 'Add New Item',
 }) => {
-  const isMobile = useMediaQuery('(max-width:600px)');
-  
+  const isMobile = useMediaQuery(lightTheme.breakpoints.down('sm'));
+  const [newItem, setNewItem] = useState({});
   const [delays, setDelays] = useState([]);
-  const [currentDelay, setCurrentDelay] = useState({
-    from: '',
-    to: '',
-    reason: '',
-    total: ''
-  });
-  const [editMode, setEditMode] = useState({});
+  const [newDelay, setNewDelay] = useState({ from: '', to: '', reason: '' });
   const [editingDelayIndex, setEditingDelayIndex] = useState(null);
 
-  // Time calculation utilities
-  // Convert HH:MM to minutes
-  const timeToMinutes = (timeStr) => {
-    if (!timeStr) return 0;
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    return hours * 60 + minutes;
-  };
+  // State to track if fields have been manually set
+  const [isClearanceManuallySet, setIsClearanceManuallySet] = useState(false);
+  const [isStartTimeManuallySet, setIsStartTimeManuallySet] = useState(false);
+  const [isStopTimeManuallySet, setIsStopTimeManuallySet] = useState(false);
 
-  // Convert minutes to HH:MM
-  const minutesToTime = (totalMinutes) => {
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = Math.floor(totalMinutes % 60);
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-  };
+  // Get the specific form structure for the current collection
+  const currentFormStructure = formStructures[collectionName];
 
-  const calculateTimeDifference = (start, end) => {
-    if (!start || !end) return '00:00';
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    const totalMins = (endDate - startDate) / (1000 * 60);
-    if (totalMins < 0) return '00:00';
-    return minutesToTime(totalMins);
-  };
-
-  // Calculate sum of all delay durations
-  const calculateTotalDelays = () => {
-    return delays.reduce((total, delay) => {
-      return total + timeToMinutes(delay.total);
-    }, 0);
-  };
- 
-  // Handle all automatic calculations
+  // Initialize numeric fields to 0 if they exist in the form structure
   useEffect(() => {
-    const updatedItem = { ...newItem };
-  
-    if (collectionName === 'reclamationData') {
-      // Calculate WL Loaded
-      const wlLoaded = Math.max(0, 
-        (parseFloat(updatedItem.wlPlaced) || 0) - 
-        (parseFloat(updatedItem.manualLoaded) || 0) - 
-        (parseFloat(updatedItem.numberOfSick) || 0));
-      updatedItem.wlLoaded = wlLoaded;
-  
-      // Calculate Average
-      updatedItem.average = wlLoaded > 0 
-        ? ((parseFloat(updatedItem.totalTon) || 0) / wlLoaded).toFixed(2)
-        : '0.00';
-  
-      // Calculate Reclamation Total Time (startTime to stopTime)
-      if (updatedItem.startTime && updatedItem.stopTime) {
-        updatedItem.totalTime = calculateTimeDifference(
-          updatedItem.startTime,
-          updatedItem.stopTime
-        );
-      }
-  
-      // Calculate Actual Time (totalTime - sum of all delays)
-      if (updatedItem.totalTime) {
-        const totalTimeMins = timeToMinutes(updatedItem.totalTime);
-        const totalDelaysMins = calculateTotalDelays();
-        const actualTimeMins = Math.max(0, totalTimeMins - totalDelaysMins);
-        updatedItem.actualTime = minutesToTime(actualTimeMins);
-      }
+    if (open && currentFormStructure) {
+      const initialNumericValues = {};
+      const numericFields = ['wlLoaded', 'wlPlaced', 'manualLoaded', 'numberOfSick'];
+      numericFields.forEach(field => {
+        if (currentFormStructure[field] && (newItem[field] === undefined || newItem[field] === null || newItem[field] === '')) {
+          initialNumericValues[field] = 0;
+        }
+      });
+      setNewItem(prev => ({ ...prev, ...initialNumericValues }));
     }
-  
-    // Vessel data calculations
-    if (collectionName === 'vessel_data') {
-      // Calculate Vessel Total Time (conv_start to completion_time)
-      if (updatedItem.conv_start && updatedItem.completion_time) {
-        updatedItem.total_time = calculateTimeDifference(
-          updatedItem.conv_start,
-          updatedItem.completion_time
-        );
-      }
-  
-      // Calculate Berthing to Completion Time (optional - if you want both)
-      // if (updatedItem.berthing_time && updatedItem.completion_time) {
-      //   updatedItem.berthing_to_completion_time = calculateTimeDifference(
-      //     updatedItem.berthing_time,
-      //     updatedItem.completion_time
-      //   );
-      // }
-    }
-  
-    setNewItem(updatedItem);
-  }, [newItem, delays, collectionName]);
+  }, [open, currentFormStructure]);
 
-  const handleFieldChange = (field, value) => {
-    setNewItem(prev => ({ ...prev, [field]: value }));
-  };
 
-  const handleDelayChange = (field, value) => {
-    const updatedDelay = {
-      ...currentDelay,
-      [field]: value
-    };
-    
-    if ((field === 'from' || field === 'to') && updatedDelay.from && updatedDelay.to) {
-      updatedDelay.total = calculateTimeDifference(updatedDelay.from, updatedDelay.to);
-    }
-    
-    setCurrentDelay(updatedDelay);
-  };
-
-  const addDelay = () => {
-    if (currentDelay.from && currentDelay.to && currentDelay.reason) {
-      const newDelays = editingDelayIndex !== null
-        ? delays.map((delay, i) => i === editingDelayIndex ? currentDelay : delay)
-        : [...delays, currentDelay];
-      
-      setDelays(newDelays);
-      setNewItem(prev => ({ ...prev, delays: newDelays }));
-      setCurrentDelay({ from: '', to: '', reason: '', total: '' });
+  useEffect(() => {
+    if (!open) {
+      // Reset all states when dialog closes
+      setNewItem({});
+      setDelays([]);
+      setNewDelay({ from: '', to: '', reason: '' });
       setEditingDelayIndex(null);
+      // Reset manual set flags
+      setIsClearanceManuallySet(false);
+      setIsStartTimeManuallySet(false);
+      setIsStopTimeManuallySet(false);
     }
+  }, [open]);
+
+  // Effect for automatic 'To' time and sequential 'From' time in delays
+  useEffect(() => {
+    if (newDelay.from && !newDelay.to && editingDelayIndex === null) {
+      const fromDate = new Date(newDelay.from);
+      if (!isNaN(fromDate.getTime())) {
+        fromDate.setMinutes(fromDate.getMinutes() + 5);
+        setNewDelay((prev) => ({ ...prev, to: formatDateTimeLocal(fromDate) }));
+      }
+    }
+  }, [newDelay.from, newDelay.to, editingDelayIndex]);
+
+  useEffect(() => {
+    if (delays.length > 0 && editingDelayIndex === null) {
+      const lastDelay = delays[delays.length - 1];
+      if (lastDelay.to) {
+        const lastToDate = new Date(lastDelay.to);
+        if (!isNaN(lastToDate.getTime())) {
+          lastToDate.setMinutes(lastToDate.getMinutes() + 5);
+          setNewDelay((prev) => ({ ...prev, from: formatDateTimeLocal(lastToDate) }));
+        }
+      }
+    }
+  }, [delays, editingDelayIndex]);
+
+  // --- Automatic Time Propagation (Initial Only) ---
+  useEffect(() => {
+    // Placement -> Clearance
+    if (newItem.placement && !isClearanceManuallySet && !newItem.clearance) {
+      setNewItem(prev => ({ ...prev, clearance: newItem.placement }));
+    }
+  }, [newItem.placement, isClearanceManuallySet, newItem.clearance]);
+
+  useEffect(() => {
+    // Clearance -> Start Time
+    if (newItem.clearance && !isStartTimeManuallySet && !newItem.startTime) {
+      setNewItem(prev => ({ ...prev, startTime: newItem.clearance }));
+    }
+  }, [newItem.clearance, isStartTimeManuallySet, newItem.startTime]);
+
+  useEffect(() => {
+    // Start Time -> Stop Time
+    if (newItem.startTime && !isStopTimeManuallySet && !newItem.stopTime) {
+      setNewItem(prev => ({ ...prev, stopTime: newItem.startTime }));
+    }
+  }, [newItem.startTime, isStopTimeManuallySet, newItem.stopTime]);
+
+
+  // --- Calculated Fields ---
+  // Calculate total_time (stopTime - startTime)
+  useEffect(() => {
+    if (newItem.startTime && newItem.stopTime) {
+      const start = new Date(newItem.startTime);
+      const stop = new Date(newItem.stopTime);
+      if (!isNaN(start.getTime()) && !isNaN(stop.getTime())) {
+        const diffMs = stop - start;
+        const totalMinutes = Math.floor(diffMs / (1000 * 60));
+        setNewItem(prev => ({ ...prev, totalTime: minutesToDuration(totalMinutes) }));
+      } else {
+        setNewItem(prev => ({ ...prev, totalTime: '00:00' }));
+      }
+    } else {
+      setNewItem(prev => ({ ...prev, totalTime: '00:00' }));
+    }
+  }, [newItem.startTime, newItem.stopTime]);
+
+  // Calculate actualTime (totalTime - sum of all delays)
+  useEffect(() => {
+    const totalTimeMinutes = durationToMinutes(newItem.totalTime);
+    const sumOfDelaysMinutes = delays.reduce((sum, delay) => sum + durationToMinutes(delay.duration), 0);
+    const actualTimeMinutes = totalTimeMinutes - sumOfDelaysMinutes;
+    setNewItem(prev => ({ ...prev, actualTime: minutesToDuration(actualTimeMinutes) }));
+  }, [newItem.totalTime, delays]);
+
+  // Calculate wlLoaded (wlPlaced - manualLoaded - numberOfSick)
+  useEffect(() => {
+    const wlPlaced = parseFloat(newItem.wlPlaced) || 0;
+    const manualLoaded = parseFloat(newItem.manualLoaded) || 0;
+    const numberOfSick = parseFloat(newItem.numberOfSick) || 0;
+    const calculatedWlLoaded = wlPlaced - manualLoaded - numberOfSick;
+    setNewItem(prev => ({ ...prev, wlLoaded: calculatedWlLoaded }));
+  }, [newItem.wlPlaced, newItem.manualLoaded, newItem.numberOfSick]);
+
+  // Calculate average (totalTon / wlLoaded)
+  useEffect(() => {
+    const totalTon = parseFloat(newItem.totalTon) || 0;
+    const wlLoaded = parseFloat(newItem.wlLoaded) || 0;
+    if (wlLoaded > 0) {
+      setNewItem(prev => ({ ...prev, average: (totalTon / wlLoaded).toFixed(2) }));
+    } else {
+      setNewItem(prev => ({ ...prev, average: '0.00' }));
+    }
+  }, [newItem.totalTon, newItem.wlLoaded]);
+
+
+  const handleChange = useCallback((e) => {
+    const { name, value, type, checked } = e.target;
+
+    // Set manual override flags if the user changes these fields
+    if (name === 'clearance') setIsClearanceManuallySet(true);
+    if (name === 'startTime') setIsStartTimeManuallySet(true);
+    if (name === 'stopTime') setIsStopTimeManuallySet(true);
+
+    setNewItem((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+    }));
+  }, []);
+
+  const handleDelayChange = useCallback((e) => {
+    const { name, value } = e.target;
+    setNewDelay((prev) => ({ ...prev, [name]: value }));
+  }, []);
+
+  const calculateDelayDuration = (from, to) => {
+    if (!from || !to) return '';
+    const startDate = new Date(from);
+    const endDate = new Date(to);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return '';
+
+    const diffMs = endDate - startDate;
+    if (diffMs < 0) return 'Invalid Time';
+
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const hours = Math.floor(diffMinutes / 60);
+    const minutes = diffMinutes % 60;
+
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   };
 
-  const removeDelay = (index) => {
-    const newDelays = delays.filter((_, i) => i !== index);
-    setDelays(newDelays);
-    setNewItem(prev => ({ ...prev, delays: newDelays }));
-  };
+  const addDelay = useCallback(() => {
+    if (newDelay.from && newDelay.to && newDelay.reason) {
+      const duration = calculateDelayDuration(newDelay.from, newDelay.to);
+      const delayToAdd = { ...newDelay, duration, date: new Date().toISOString().split('T')[0] }; // Add current date
+      if (editingDelayIndex !== null) {
+        const updatedDelays = [...delays];
+        updatedDelays[editingDelayIndex] = delayToAdd;
+        setDelays(updatedDelays);
+        setEditingDelayIndex(null);
+      } else {
+        setDelays((prev) => [...prev, delayToAdd]);
+      }
+      setNewDelay({ from: '', to: '', reason: '' }); // Reset newDelay after adding/updating
+    }
+  }, [newDelay, delays, editingDelayIndex]);
 
-  const editDelay = (index) => {
-    setCurrentDelay(delays[index]);
+  const editDelay = useCallback((index) => {
+    setNewDelay(delays[index]);
     setEditingDelayIndex(index);
+  }, [delays]);
+
+  const removeDelay = useCallback((index) => {
+    setDelays((prev) => prev.filter((_, i) => i !== index));
+    if (editingDelayIndex === index) {
+      setEditingDelayIndex(null);
+      setNewDelay({ from: '', to: '', reason: '' });
+    }
+  }, [delays, editingDelayIndex]);
+
+  const handleSave = () => {
+    // Combine newItem with delays before passing to handleAdd
+    handleAdd({ ...newItem, delays: delays });
+    onClose(); // Close the dialog after saving
   };
 
-  const toggleEditMode = (field) => {
-    setEditMode(prev => ({ ...prev, [field]: !prev[field] }));
-  };
+  // Helper to render fields based on currentFormStructure
+  const renderField = (fieldKey, fieldConfig) => {
+    const value = newItem[fieldKey] || '';
+    const isAutoSet = (
+      (fieldKey === 'clearance' && newItem.clearance === newItem.placement && !isClearanceManuallySet) ||
+      (fieldKey === 'startTime' && newItem.startTime === newItem.clearance && !isStartTimeManuallySet) ||
+      (fieldKey === 'stopTime' && newItem.stopTime === newItem.startTime && !isStopTimeManuallySet) ||
+      ['totalTime', 'actualTime', 'wlLoaded', 'average'].includes(fieldKey)
+    );
 
-  const renderField = (field) => {
-    const fieldConfig = formStructures?.[collectionName]?.[field] || {
-      type: 'text',
-      label: field.charAt(0).toUpperCase() + field.slice(1),
-      required: false
+    const commonProps = {
+      fullWidth: true,
+      margin: "normal",
+      variant: "outlined",
+      name: fieldKey,
+      label: fieldConfig.label,
+      value: value,
+      onChange: handleChange,
+      required: fieldConfig.required,
+      InputLabelProps: { shrink: true }, // For accessibility and consistent label behavior
+      // disabled: fieldConfig.readonly || isAutoSet, // Removed disabled to allow editing
+      'aria-label': fieldConfig.label, // Accessibility
+      sx: isAutoSet ? {
+        backgroundColor: lightTheme.palette.autofill.main,
+        '& .MuiInputBase-input': {
+          color: lightTheme.palette.autofill.text,
+        },
+        '& .MuiInputLabel-root': {
+          color: lightTheme.palette.autofill.text,
+        },
+      } : {},
     };
 
-    const fieldValue = newItem?.[field] ?? '';
-
-    if (editMode[field]) {
-      return (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <TextField
-            required={fieldConfig.required}
-            type={fieldConfig.type || 'text'}
-            label={fieldConfig.label}
-            fullWidth
-            size="small"
-            multiline={fieldConfig.type === 'textarea'}
-            rows={fieldConfig.type === 'textarea' ? 3 : 1}
-            InputLabelProps={
-              fieldConfig.type === 'datetime-local' || fieldConfig.type === 'date' 
-                ? { shrink: true } 
-                : {}
-            }
-            value={fieldValue}
-            onChange={(e) => handleFieldChange(field, e.target.value)}
-            autoFocus
-          />
-          <IconButton size="small" onClick={() => toggleEditMode(field)}>
-            <SaveIcon fontSize="small" color="primary" />
-          </IconButton>
-        </Box>
-      );
+    switch (fieldConfig.type) {
+      case 'text':
+      case 'number':
+      case 'datetime-local':
+      case 'date':
+        return <TextField {...commonProps} type={fieldConfig.type} />;
+      case 'textarea':
+        return <TextField {...commonProps} multiline rows={4} />; // Default rows, auto-height handled by MUI
+      case 'array': // For delays, which is a special array type handled separately
+        return null; // Handled by the dedicated delays section
+      default:
+        return <TextField {...commonProps} />;
     }
-
-    return (
-      <Box 
-        sx={{ 
-          py: 1,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          cursor: 'pointer',
-          '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.04)' }
-        }}
-        onClick={() => toggleEditMode(field)}
-      >
-        <Box>
-          <Typography variant="caption" color="textSecondary">
-            {fieldConfig.label}
-          </Typography>
-          <Typography 
-            variant="body1" 
-            sx={{ 
-              wordBreak: 'break-word',
-              whiteSpace: fieldConfig.type === 'textarea' ? 'pre-wrap' : 'normal',
-              color: ['average', 'wlLoaded', 'actualTime', 'total_time'].includes(field) 
-                ? 'primary.main' 
-                : 'inherit'
-            }}
-          >
-            {fieldValue } 
-            {/* fieldValue || '—' */}
-          </Typography>
-        </Box>
-        <IconButton size="small">
-          {/* <EditIcon fontSize="small" /> */}
-        </IconButton>
-      </Box>
-    );
   };
+
+  // Grouping fields for better UI
+  const getGroupedFields = () => {
+    const groups = {
+      main: [],
+      wlSection: [], // For wlLoaded, wlPlaced, manualLoaded, numberOfSick
+      operatorSection: [], // For sr, wl, CRoomOPerator, ShiftIncharge
+      other: [],
+    };
+
+    if (!currentFormStructure) return groups;
+
+    Object.entries(currentFormStructure).forEach(([fieldKey, fieldConfig]) => {
+      if (fieldConfig.type === 'array') return; // Delays handled separately
+
+      if (['wlLoaded', 'wlPlaced', 'manualLoaded', 'numberOfSick', 'totalTon', 'average'].includes(fieldKey)) {
+        groups.wlSection.push({ fieldKey, fieldConfig });
+      } else if (['sr', 'wl', 'CRoomOPerator', 'ShiftIncharge'].includes(fieldKey)) {
+        groups.operatorSection.push({ fieldKey, fieldConfig });
+      } else {
+        groups.main.push({ fieldKey, fieldConfig });
+      }
+    });
+    return groups;
+  };
+
+  const groupedFields = getGroupedFields();
 
   return (
-    <ThemeProvider theme={darkTheme}>
-      <Dialog 
-        open={open} 
-        onClose={onClose} 
-        maxWidth="md" 
+    <ThemeProvider theme={lightTheme}>
+      <Dialog
+        open={open}
+        onClose={onClose}
         fullWidth
-        fullScreen={isMobile}
+        maxWidth="md"
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+            backgroundColor: (theme) => theme.palette.background.paper,
+            color: (theme) => theme.palette.text.primary,
+          },
+        }}
       >
-        <DialogTitle sx={{ 
-          bgcolor: 'primary.dark',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          py: 1,
-          px: 2
+        <DialogTitle sx={{
+          backgroundColor: (theme) => theme.palette.primary.main,
+          color: '#fff',
+          fontWeight: 'bold',
+          py: 1.5,
+          px: isMobile ? 1.5 : 3,
+          borderTopLeftRadius: 8,
+          borderTopRightRadius: 8,
         }}>
-          <Typography variant="subtitle1" component="div">{title}</Typography>
+          {title}
         </DialogTitle>
-        <DialogContent sx={{ p: isMobile ? 0.5 : 2 }}>
-          <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Card elevation={1}>
-              <Box sx={{ p: 1 }}>
-                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                  General Information
-                </Typography>
-                <Divider sx={{ mb: 1 }} />
-                <Box sx={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fill, minmax(250px, 1fr))',
-                  gap: 1 
-                }}>
-                  {fields.filter(f => f !== 'delays').map((field) => (
-                    <Box key={field} sx={{ p: 0.5 }}>
-                      {renderField(field)}
-                    </Box>
-                  ))}
-                </Box>
-              </Box>
+        <DialogContent sx={{ p: isMobile ? 1.5 : 3, backgroundColor: (theme) => theme.palette.background.default }}>
+          <Box component="form" noValidate autoComplete="off" sx={{ '& .MuiTextField-root': { mb: 2 } }}>
+            {/* Main Fields Section */}
+            <Card variant="outlined" sx={{ mb: 3, p: 2, backgroundColor: (theme) => theme.palette.background.paper }}>
+              <Typography variant="h6" color="primary" sx={{ mb: 2 }}>General Information</Typography>
+              <Grid container spacing={2}>
+                {groupedFields.main.map(({ fieldKey, fieldConfig }) => (
+                  <Grid item xs={12} sm={6} key={fieldKey}>
+                    {renderField(fieldKey, fieldConfig)}
+                  </Grid>
+                ))}
+              </Grid>
             </Card>
 
-            {fields.includes('delays') && (
-              <Card elevation={1}>
-                <Box sx={{ p: 1 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <AccessTimeIcon color="primary" fontSize="small" />
-                      <Typography variant="subtitle2" fontWeight="bold">Delays</Typography>
-                    </Box>
-                    <Chip label={`${delays.length} records`} size="small" color="primary" variant="outlined" />
-                  </Box>
-                  <Divider sx={{ mb: 1 }} />
-                  
-                  <Box sx={{ 
-                    display: 'flex', 
-                    flexDirection: isMobile ? 'column' : 'row',
-                    gap: 1, 
-                    alignItems: isMobile ? 'stretch' : 'center', 
-                    mb: 1,
-                    p: 1,
-                    borderRadius: 1,
-                    bgcolor: 'background.default'
-                  }}>
+            {/* WL/Material Section (conditionally rendered) */}
+            {groupedFields.wlSection.length > 0 && (
+              <Card variant="outlined" sx={{ mb: 3, p: 2, backgroundColor: (theme) => theme.palette.background.paper }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <WarehouseIcon color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="h6" color="primary">Material & Loading</Typography>
+                </Box>
+                <Grid container spacing={2}>
+                  {groupedFields.wlSection.map(({ fieldKey, fieldConfig }) => (
+                    <Grid item xs={12} sm={6} key={fieldKey}>
+                      {renderField(fieldKey, fieldConfig)}
+                    </Grid>
+                  ))}
+                </Grid>
+              </Card>
+            )}
+
+            {/* Operators Section (conditionally rendered) */}
+            {groupedFields.operatorSection.length > 0 && (
+              <Card variant="outlined" sx={{ mb: 3, p: 2, backgroundColor: (theme) => theme.palette.background.paper }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <EngineeringIcon color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="h6" color="primary">Operators</Typography>
+                </Box>
+                <Grid container spacing={2}>
+                  {groupedFields.operatorSection.map(({ fieldKey, fieldConfig }) => (
+                    <Grid item xs={12} sm={6} key={fieldKey}>
+                      {renderField(fieldKey, fieldConfig)}
+                    </Grid>
+                  ))}
+                </Grid>
+              </Card>
+            )}
+
+            {/* Delays Section (conditionally rendered if 'delays' is in formStructure) */}
+            {currentFormStructure?.delays && (
+              <Card variant="outlined" sx={{ mt: 3, p: 2, backgroundColor: (theme) => theme.palette.background.paper }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <AccessTimeIcon color="primary" sx={{ mr: 1 }} />
+                  <Typography variant="h6" color="primary">Delays</Typography>
+                </Box>
+                <Grid container spacing={2} alignItems="center">
+                  <Grid item xs={12} sm={4}>
                     <TextField
+                      fullWidth
+                      margin="dense"
+                      label="From (Date & Time)"
                       type="datetime-local"
-                      label="From"
-                      size="small"
-                      value={currentDelay.from}
-                      onChange={(e) => handleDelayChange('from', e.target.value)}
+                      name="from"
+                      value={newDelay.from}
+                      onChange={handleDelayChange}
                       InputLabelProps={{ shrink: true }}
-                      sx={{ flex: 1 }}
+                      aria-label="Delay start date and time"
                     />
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
                     <TextField
+                      fullWidth
+                      margin="dense"
+                      label="To (Date & Time)"
                       type="datetime-local"
-                      label="To"
-                      size="small"
-                      value={currentDelay.to}
-                      onChange={(e) => handleDelayChange('to', e.target.value)}
+                      name="to"
+                      value={newDelay.to}
+                      onChange={handleDelayChange}
                       InputLabelProps={{ shrink: true }}
-                      sx={{ flex: 1 }}
+                      aria-label="Delay end date and time"
                     />
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
                     <TextField
+                      fullWidth
+                      margin="dense"
                       label="Reason"
-                      size="small"
-                      value={currentDelay.reason}
-                      onChange={(e) => handleDelayChange('reason', e.target.value)}
-                      sx={{ flex: isMobile ? 1 : 2 }}
+                      name="reason"
+                      value={newDelay.reason}
+                      onChange={handleDelayChange}
+                      multiline
+                      rows={1} // Start with 1 row, let it expand
+                      maxRows={6} // Max rows for expansion
+                      InputLabelProps={{ shrink: true }}
+                      aria-label="Reason for delay"
                     />
-                    <TextField
-                      label="Duration"
-                      size="small"
-                      value={currentDelay.total}
-                      InputProps={{ readOnly: true }}
-                      sx={{ flex: isMobile ? 1 : 0.5 }}
-                    />
-                    <Button 
-                      variant="contained" 
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="textSecondary" sx={{ ml: 1 }}>
+                      Duration: {calculateDelayDuration(newDelay.from, newDelay.to)}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Button
+                      variant="contained"
                       startIcon={<AddIcon />}
                       onClick={addDelay}
-                      fullWidth={isMobile}
-                      size="small"
+                      disabled={!newDelay.from || !newDelay.to || !newDelay.reason}
+                      sx={{ mt: 1 }}
+                      aria-label={editingDelayIndex !== null ? 'Update Delay' : 'Add Delay'}
                     >
-                      {editingDelayIndex !== null ? 'Update' : 'Add'}
+                      {editingDelayIndex !== null ? 'Update Delay' : 'Add Delay'}
                     </Button>
-                  </Box>
-                  
+                  </Grid>
+                </Grid>
+
+                <Box sx={{ mt: 3 }}>
                   {delays.length > 0 ? (
-                    <TableContainer component={Paper} sx={{ mb: 1, maxHeight: 250, overflowY: 'auto' }}>
-                      <Table size="small" stickyHeader>
+                    <TableContainer component={Paper} variant="outlined">
+                      <Table size="small">
                         <TableHead>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 'bold' }}>From</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold' }}>To</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold' }}>Duration</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold' }}>Reason</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 'bold' }}>Action</TableCell>
+                          <TableRow sx={{ backgroundColor: (theme) => theme.palette.action.hover }}>
+                            <TableCell>From</TableCell>
+                            <TableCell>To</TableCell>
+                            <TableCell>Reason</TableCell>
+                            <TableCell>Duration</TableCell>
+                            <TableCell>Actions</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
                           {delays.map((delay, index) => (
-                            <TableRow key={index} hover>
-                              <TableCell>{new Date(delay.from).toLocaleString()}</TableCell>
-                              <TableCell>{new Date(delay.to).toLocaleString()}</TableCell>
+                            <TableRow key={index}>
+                              <TableCell>{delay.from ? new Date(delay.from).toLocaleString() : 'N/A'}</TableCell>
+                              <TableCell>{delay.to ? new Date(delay.to).toLocaleString() : 'N/A'}</TableCell>
+                              <TableCell>{delay.reason}</TableCell>
+                              <TableCell>{delay.duration}</TableCell>
                               <TableCell>
-                                <Chip label={delay.total} size="small" color="primary" variant="outlined" />
-                              </TableCell>
-                              <TableCell sx={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {delay.reason}
-                              </TableCell>
-                              <TableCell align="center">
-                                <IconButton size="small" onClick={() => editDelay(index)} color="primary">
+                                <IconButton size="small" onClick={() => editDelay(index)} color="primary" aria-label={`Edit delay ${index + 1}`}>
                                   <EditIcon fontSize="small" />
                                 </IconButton>
-                                <IconButton size="small" onClick={() => removeDelay(index)} color="error">
+                                <IconButton size="small" onClick={() => removeDelay(index)} color="error" aria-label={`Remove delay ${index + 1}`}>
                                   <DeleteIcon fontSize="small" />
                                 </IconButton>
                               </TableCell>
@@ -404,8 +555,8 @@ const AddItemDialog = ({
                       </Table>
                     </TableContainer>
                   ) : (
-                    <Box sx={{ textAlign: 'center', py: 2, borderRadius: 1 }}>
-                      <Typography variant="caption" color="textSecondary">No delays recorded</Typography>
+                    <Box sx={{ textAlign: 'center', py: 3, borderRadius: 1, backgroundColor: 'rgba(0,0,0,0.02)' }}>
+                      <Typography variant="body2" color="textSecondary">No delays recorded yet.</Typography>
                     </Box>
                   )}
                 </Box>
@@ -413,9 +564,9 @@ const AddItemDialog = ({
             )}
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 2, py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-          <Button onClick={onClose} variant="outlined" size="small">Cancel</Button>
-          <Button onClick={handleAdd} variant="contained" size="small" startIcon={<SaveIcon />}>Save</Button>
+        <DialogActions sx={{ px: isMobile ? 1.5 : 2, py: 1.5, borderTop: '1px solid', borderColor: 'divider', backgroundColor: (theme) => theme.palette.background.default }}>
+          <Button onClick={onClose} variant="outlined" color="inherit" size="medium" aria-label="Cancel adding item">Cancel</Button>
+          <Button onClick={handleSave} variant="contained" size="medium" startIcon={<SaveIcon />} aria-label="Save new item">Save Item</Button>
         </DialogActions>
       </Dialog>
     </ThemeProvider>

@@ -543,7 +543,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
   }, [colletionsData, collectionName]);
 
   const [editingItem, setEditingItem] = useState(null);
-  const [newItem, setNewItem] = useState({});
+  // Removed: newItem and setNewItem state as AddItemDialog now manages its own state
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -595,7 +595,8 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
     setSnackbar({ open: true, message, severity });
   };
 
-  const handleAdd = async () => {
+  // Modified handleAdd to accept itemToAdd directly
+  const handleAdd = async (itemToAdd) => { // Accept itemToAdd as argument
     if (!canCreate()) {
       showSnackbar('You do not have permission to create items', 'error');
       return;
@@ -603,10 +604,10 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
 
     try {
       const collectionRef = collection(db, collectionName);
-      const docRef = await addDoc(collectionRef, newItem);
-      setData([...data, { id: docRef.id, ...newItem }]);
+      const docRef = await addDoc(collectionRef, itemToAdd); // Use itemToAdd here
+      setData([...data, { id: docRef.id, ...itemToAdd }]); // Use itemToAdd here
       setIsAddDialogOpen(false);
-      setNewItem({});
+      // Removed setNewItem({}) as newItem state is no longer used
       showSnackbar('Item added successfully');
     } catch (error) {
       showSnackbar('Error adding item', 'error');
@@ -614,18 +615,19 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
     }
   };
 
-  const handleUpdate = async () => {
+  // Modified handleUpdate to accept itemToUpdate directly
+  const handleUpdate = async (itemToUpdate) => {
     if (!canUpdate()) {
       showSnackbar('You do not have permission to update items', 'error');
       return;
     }
 
     try {
-      const docRef = doc(db, collectionName, editingItem.id);
-      const updateData = { ...editingItem, u_validation: editingItem.u_validation === 'true' };
+      const docRef = doc(db, collectionName, itemToUpdate.id); // Use itemToUpdate.id
+      const updateData = { ...itemToUpdate, u_validation: itemToUpdate.u_validation === 'true' }; // Use itemToUpdate
       delete updateData.id;
       await updateDoc(docRef, updateData);
-      setData(data.map((item) => (item.id === editingItem.id ? { ...editingItem } : item)));
+      setData(data.map((item) => (item.id === itemToUpdate.id ? { ...itemToUpdate } : item))); // Use itemToUpdate
       setIsEditDialogOpen(false);
       setEditingItem(null);
       showSnackbar('Item updated successfully');
@@ -783,7 +785,6 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
   const handleEditClick = (item) => {
     if (item === null) {
       // Add new item
-      // setNewItem({});
       setIsAddDialogOpen(true);
     } else {
       // Edit existing item
@@ -882,8 +883,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
         fields={fields}
         collectionName={collectionName}
         formStructures={formStructures}
-        newItem={newItem}
-        setNewItem={setNewItem}
+        // Removed newItem and setNewItem props
         handleAdd={handleAdd} 
         // Optional:
         title={collectionName} // defaults to "Add New Item"
@@ -897,8 +897,8 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
           editingItem={editingItem}
           setEditingItem={setEditingItem}
           fields={fields}
-          handleUpdate={handleUpdate}
-          formStructures={formStructures[collectionName]} // Pass only the relevant structure
+          handleUpdate={handleUpdate} // Now passes the updated item directly
+          formStructure={formStructures[collectionName]} // Changed prop name to singular 'formStructure'
           collectionName={collectionName}
           title={editingItem?.rakeNo || editingItem?.Vessel_name || 'Edit Item'} // Safe title access
         />
