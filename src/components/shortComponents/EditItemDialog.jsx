@@ -3,7 +3,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Box, TextField, Button, Typography, IconButton,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-  Card, Chip, Divider, useMediaQuery, Grid
+  Grid
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -14,115 +14,156 @@ import {
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EngineeringIcon from '@mui/icons-material/Engineering'; // For operators
 import WarehouseIcon from '@mui/icons-material/Warehouse'; // For WL/material
-import { createTheme, ThemeProvider } from '@mui/material/styles';
+import Clock from '@mui/icons-material/AccessTime'; // Import Clock icon for consistency
 
-// Light Theme (Copied from AddItemDialog for consistency)
-const lightTheme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: '#1976d2', // Standard Material UI blue
-    },
-    secondary: {
-      main: '#dc004e', // Standard Material UI pink
-    },
-    background: {
-      paper: '#ffffff',
-      default: '#f4f6f8',
-    },
-    text: {
-      primary: 'rgba(0, 0, 0, 0.87)',
-      secondary: 'rgba(0, 0, 0, 0.6)',
-    },
-    action: {
-      active: 'rgba(0, 0, 0, 0.54)',
-    },
-    success: { // For auto-validation status
-      main: '#4caf50',
-    },
-    info: { // For auto-validation status
-      main: '#2196f3',
-    },
-    warning: { // For delays
-      main: '#ff9800',
-    },
-    autofill: { // Custom color for auto-filled fields
-      main: '#e8f0fe', // Light blue for auto-filled background
-      text: 'rgba(0, 0, 0, 0.87)', // Standard text color
-    }
-  },
-});
-
-// Helper function to format a Date object into YYYY-MM-DDTHH:mm for datetime-local input
-const formatDateTimeLocal = (date) => {
-  if (!date || isNaN(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
-
-// Helper to convert HH:mm duration string to minutes
-const durationToMinutes = (duration) => {
-  if (!duration || typeof duration !== 'string') return 0;
-  const parts = duration.split(':');
-  if (parts.length === 2) {
-    const hours = parseInt(parts[0], 10);
-    const minutes = parseInt(parts[1], 10);
-    if (!isNaN(hours) && !isNaN(minutes)) {
-      return hours * 60 + minutes;
-    }
-  }
-  return 0;
-};
-
-// Helper to convert minutes to HH:mm duration string
-const minutesToDuration = (totalMinutes) => {
-  if (isNaN(totalMinutes) || totalMinutes < 0) return '00:00';
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-};
-
+// Tailwind CSS is assumed to be available in the environment.
 
 const EditItemDialog = ({
   open,
   onClose,
-  editingItem,
-  setEditingItem,
-  fields,
-  handleUpdate, // This prop will now receive the updated item directly
-  formStructure, // Now receiving the specific form structure
+  editingItem, // The item currently being edited
+  setEditingItem, // Function to update the parent's editing item state (optional, for direct state management)
+  formStructure, // FIX: Now directly accepting the specific form structure (singular)
   collectionName,
+  handleUpdate, // This prop now receives the updated item directly
   title = 'Edit Item',
 }) => {
-  const isMobile = useMediaQuery(lightTheme.breakpoints.down('sm'));
+  // --- Helper Functions (Moved inside component for guaranteed scope) ---
+  // Helper function to format a Date object into ISO string for datetime-local input
+  const formatDateTimeLocal = (date) => {
+    if (!date || isNaN(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
+  // Helper to convert HH:mm duration string to minutes
+  const durationToMinutes = (duration) => {
+    if (!duration || typeof duration !== 'string') return 0;
+    const parts = duration.split(':');
+    if (parts.length === 2) {
+      const hours = parseInt(parts[0], 10);
+      const minutes = parseInt(parts[1], 10);
+      if (!isNaN(hours) && !isNaN(minutes)) {
+        return hours * 60 + minutes;
+      }
+    }
+    return 0;
+  };
+
+  // Helper to convert minutes to HH:mm duration string
+  const minutesToDuration = (totalMinutes) => {
+    if (isNaN(totalMinutes) || totalMinutes < 0) return '00:00';
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  };
+
+  // Helper to format date-time for display (from DetailsShowPopUP)
+  const formatDateTime = (dateTime) => {
+    if (!dateTime) return '';
+    const date = new Date(dateTime);
+    return date.toLocaleString();
+  };
+
+  // Helper to format delay duration for display (from DetailsShowPopUP)
+  const formatDelayDuration = (delay) => {
+    if (!delay.from || !delay.to) return 'N/A';
+
+    try {
+      const from = new Date(delay.from);
+      const to = new Date(delay.to);
+      const diffMs = to - from;
+      const diffMins = Math.floor(diffMs / 60000);
+
+      if (diffMins < 60) {
+        return `${diffMins} minutes`;
+      } else {
+        const hours = Math.floor(diffMins / 60);
+        const mins = diffMins % 60;
+        return `${hours}h ${mins}m`;
+      }
+    } catch (e) {
+      return 'N/A';
+    }
+  };
+
+  // The problematic one that was undefined
+  const calculateDelayDuration = (from, to) => {
+    if (!from || !to) return '';
+    const startDate = new Date(from);
+    const endDate = new Date(to);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return '';
+
+    const diffMs = endDate - startDate;
+    if (diffMs < 0) return 'Invalid Time';
+
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const hours = Math.floor(diffMinutes / 60);
+    const minutes = diffMinutes % 60;
+
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  };
+
+  // --- End Helper Functions ---
+
+
+  // --- ERROR FIX START ---
+  // Early return if crucial props are missing to prevent TypeError
+  // Now checking for formStructure (singular) directly
+  if (!formStructure || !collectionName) {
+    console.error("EditItemDialog: formStructure or collectionName is undefined. Cannot render dialog.");
+    return null;
+  }
+
+  const currentFormStructure = formStructure; // FIX: Directly use the passed formStructure
+  // --- ERROR FIX END ---
+
+
+  const LOCAL_STORAGE_KEY_PREFIX = 'ops_management_edit_draft_'; // Different key for edit dialog
+  // Use item ID for unique key to avoid conflicts with other edited items
+  const localStorageKey = `${LOCAL_STORAGE_KEY_PREFIX}${collectionName}_${editingItem?.id || 'new'}`;
+
   const [localEditingItem, setLocalEditingItem] = useState({});
   const [delays, setDelays] = useState([]);
   const [newDelay, setNewDelay] = useState({ from: '', to: '', reason: '' });
   const [editingDelayIndex, setEditingDelayIndex] = useState(null);
 
   // State to track if fields have been manually set (for initial propagation only)
-  // For EditItemDialog, these flags are mainly for consistency if a field is cleared and then re-entered.
   const [isClearanceManuallySet, setIsClearanceManuallySet] = useState(false);
   const [isStartTimeManuallySet, setIsStartTimeManuallySet] = useState(false);
   const [isStopTimeManuallySet, setIsStopTimeManuallySet] = useState(false);
 
 
+  // Effect to load draft data or initial item data on dialog open/editingItem change
   useEffect(() => {
-    if (editingItem) {
-      // Initialize local state with editingItem data
-      setLocalEditingItem(editingItem);
-      // Ensure delays are initialized as an array
-      setDelays(editingItem.delays || []);
-      // Reset manual set flags on new item load
-      setIsClearanceManuallySet(false);
-      setIsStartTimeManuallySet(false);
-      setIsStopTimeManuallySet(false);
-    } else {
-      // Reset state when dialog is closed or no item is being edited
+    if (open && editingItem) {
+      try {
+        const savedDraft = localStorage.getItem(localStorageKey);
+        if (savedDraft) {
+          const parsedDraft = JSON.parse(savedDraft);
+          setLocalEditingItem(parsedDraft.localEditingItem || {});
+          setDelays(parsedDraft.delays || []);
+        } else {
+          // If no draft, initialize with editingItem data
+          setLocalEditingItem(editingItem);
+          setDelays(editingItem.delays || []);
+        }
+        // Reset manual flags on new item load or dialog open
+        setIsClearanceManuallySet(false);
+        setIsStartTimeManuallySet(false);
+        setIsStopTimeManuallySet(false);
+      } catch (e) {
+        console.error("Failed to load draft from localStorage:", e);
+        // Fallback to initial item data on error
+        setLocalEditingItem(editingItem);
+        setDelays(editingItem.delays || []);
+      }
+    } else if (!open) {
+      // Reset all states when dialog closes
       setLocalEditingItem({});
       setDelays([]);
       setNewDelay({ from: '', to: '', reason: '' });
@@ -131,7 +172,18 @@ const EditItemDialog = ({
       setIsStartTimeManuallySet(false);
       setIsStopTimeManuallySet(false);
     }
-  }, [editingItem, open]); // Depend on 'open' to reset when dialog closes
+  }, [open, editingItem, localStorageKey, collectionName]); // Depend on relevant props for re-initialization
+
+  // Effect to save draft data to local storage on every localEditingItem or delays change
+  useEffect(() => {
+    if (open && localEditingItem) { // Only save if dialog is open and an item is being edited
+      try {
+        localStorage.setItem(localStorageKey, JSON.stringify({ localEditingItem, delays }));
+      } catch (e) {
+        console.error("Failed to save draft to localStorage:", e);
+      }
+    }
+  }, [localEditingItem, delays, open, localStorageKey]); // Depend on localEditingItem, delays, and open state
 
   // Effect for automatic 'To' time and sequential 'From' time in delays
   useEffect(() => {
@@ -158,7 +210,6 @@ const EditItemDialog = ({
   }, [delays, editingDelayIndex]);
 
   // --- Automatic Time Propagation (Initial Only for Edit, if fields are cleared) ---
-  // This logic is slightly different for edit, it only propagates if the target field is empty
   useEffect(() => {
     // Placement -> Clearance
     if (localEditingItem.placement && !isClearanceManuallySet && !localEditingItem.clearance) {
@@ -247,22 +298,6 @@ const EditItemDialog = ({
     setNewDelay((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const calculateDelayDuration = (from, to) => {
-    if (!from || !to) return '';
-    const startDate = new Date(from);
-    const endDate = new Date(to);
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return '';
-
-    const diffMs = endDate - startDate;
-    if (diffMs < 0) return 'Invalid Time';
-
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
-    const hours = Math.floor(diffMinutes / 60);
-    const minutes = diffMinutes % 60;
-
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-  };
-
   const addDelay = useCallback(() => {
     if (newDelay.from && newDelay.to && newDelay.reason) {
       const duration = calculateDelayDuration(newDelay.from, newDelay.to);
@@ -277,7 +312,7 @@ const EditItemDialog = ({
       }
       setNewDelay({ from: '', to: '', reason: '' }); // Reset newDelay after adding/updating
     }
-  }, [newDelay, delays, editingDelayIndex]);
+  }, [newDelay, delays, editingDelayIndex, calculateDelayDuration]); // Add calculateDelayDuration to deps
 
   const editDelay = useCallback((index) => {
     setNewDelay(delays[index]);
@@ -295,78 +330,164 @@ const EditItemDialog = ({
   const handleSave = () => {
     // Pass the complete localEditingItem (with updated delays) to handleUpdate
     handleUpdate({ ...localEditingItem, delays: delays });
+    // Clear the draft from local storage after successful save
+    try {
+      localStorage.removeItem(localStorageKey);
+    } catch (e) {
+      console.error("Failed to clear draft from localStorage:", e);
+    }
     onClose(); // Close the dialog after saving
   };
 
-  // Helper to render fields based on formStructure
+  // Helper to render fields based on currentFormStructure
   const renderField = (fieldKey, fieldConfig) => {
     const value = localEditingItem[fieldKey] || '';
-    const isAutoSet = (
-      (fieldKey === 'clearance' && localEditingItem.clearance === localEditingItem.placement && !isClearanceManuallySet) ||
-      (fieldKey === 'startTime' && localEditingItem.startTime === localEditingItem.clearance && !isStartTimeManuallySet) ||
-      (fieldKey === 'stopTime' && localEditingItem.stopTime === localEditingItem.startTime && !isStopTimeManuallySet) ||
-      ['totalTime', 'actualTime', 'wlLoaded', 'average'].includes(fieldKey)
-    );
 
-    const commonProps = {
-      fullWidth: true,
-      margin: "normal",
-      variant: "outlined",
-      name: fieldKey,
-      label: fieldConfig.label,
-      value: value,
-      onChange: handleChange,
-      required: fieldConfig.required,
-      InputLabelProps: { shrink: true }, // For accessibility and consistent label behavior
-      // disabled: fieldConfig.readonly || isAutoSet, // Removed disabled to allow editing
-      'aria-label': fieldConfig.label, // Accessibility
-      sx: isAutoSet ? {
-        backgroundColor: lightTheme.palette.autofill.main,
-        '& .MuiInputBase-input': {
-          color: lightTheme.palette.autofill.text,
+    // Determine if the field is calculated and should be readOnly
+    const isCalculatedField = ['totalTime', 'actualTime', 'wlLoaded', 'average'].includes(fieldKey);
+    const isReadOnly = isCalculatedField; // Only calculated fields are truly read-only in terms of direct input
+
+    // Styling for the TextField to make it appear as plain text but interactive
+    const customInputProps = {
+      disableUnderline: true, // Remove the standard Material-UI underline
+      sx: {
+        padding: '0 !important', // Remove internal padding for the input element
+        '&.MuiInputBase-root': {
+          '&:before': { borderBottom: 'none !important' }, // Remove default underline
+          '&:after': { borderBottom: 'none !important' }, // Remove focused underline
+          '&:hover:not(.Mui-disabled):before': { borderBottom: 'none !important' }, // Remove hover underline
         },
-        '& .MuiInputLabel-root': {
-          color: lightTheme.palette.autofill.text,
-        },
-      } : {},
+      }
     };
 
-    switch (fieldConfig.type) {
-      case 'text':
-      case 'number':
-      case 'datetime-local':
-      case 'date':
-        return <TextField {...commonProps} type={fieldConfig.type} />;
-      case 'textarea':
-        return <TextField {...commonProps} multiline rows={4} />; // Default rows, auto-height handled by MUI
-      case 'array': // For delays, which is a special array type handled separately
-        return null; // Handled by the dedicated delays section
-      default:
-        return <TextField {...commonProps} />;
-    }
+    return (
+      <Box className="flex justify-between items-center mb-2"> {/* Tailwind styling for spacing and alignment */}
+        {/* Render the label as Typography for better control over styling like DetailsShowPopUP */}
+        <Typography variant="body1" component="label" htmlFor={fieldKey} className="font-medium text-gray-600 mr-2 w-full">
+          {fieldConfig.label}:
+        </Typography>
+        <TextField
+          fullWidth
+          variant="standard" // Use standard variant to remove default borders/backgrounds easily
+          name={fieldKey}
+          id={fieldKey} // Link label to input
+          value={value}
+          onChange={handleChange}
+          required={fieldConfig.required}
+          InputLabelProps={{
+            shrink: true, // Always shrink the label so it acts as a header
+            sx: {
+              position: 'relative', // Position label relatively
+              transform: 'none !important', // Prevent default transform
+              top: 'unset',
+              left: 'unset',
+              mb: 0.5, // Add a small margin below the label
+              fontWeight: '600', // Make label bold like in DetailsShowPopUP
+              color: 'rgb(75 85 99)', // text-gray-600 from DetailsShowPopUP
+              display: 'none' // Hide Material UI's default label as we're using Typography
+            }
+          }} // Apply custom label props
+          InputProps={{ // Apply custom input props
+            ...customInputProps,
+            readOnly: isReadOnly, // Control editability here
+            className: `text-gray-800 ${isCalculatedField ? 'font-semibold' : ''} ${fieldConfig.type === 'datetime-local' || fieldConfig.type === 'date' ? 'text-right' : 'text-left'}` // Conditional styling
+          }}
+          type={fieldConfig.type === 'textarea' ? 'text' : fieldConfig.type} // Use type="text" for textarea visual
+          multiline={fieldConfig.type === 'textarea'} // Enable multiline for textarea
+          rows={fieldConfig.type === 'textarea' ? 1 : undefined} // Start with 1 row for textarea
+          maxRows={fieldConfig.type === 'textarea' ? 6 : undefined} // Max rows for textarea expansion
+          // Remove margin for the TextField component itself and handle spacing with parent Box
+          sx={{
+            m: 0,
+            '& .MuiInputBase-input': {
+              padding: '0 !important', // Ensures no padding inside the input text
+              minWidth: 'auto', // Allow input to shrink if needed
+            },
+            // Hide the default label from TextField component, as we're rendering it with Typography
+            '& .MuiInputLabel-root': {
+                display: 'none'
+            }
+          }}
+          aria-label={fieldConfig.label}
+        />
+      </Box>
+    );
   };
+
+  // Render Delays Section (Modified to match DetailsShowPopUP style)
+  const renderDelaysDisplay = (delaysToDisplay) => {
+    if (!delaysToDisplay || delaysToDisplay.length === 0) {
+      return (
+        <div className="bg-green-50 p-4 rounded-lg">
+          <p className="text-green-800 font-medium">No delays recorded</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        {delaysToDisplay.map((delay, index) => (
+          <div key={index} className="border-l-4 border-yellow-500 pl-3 py-1">
+            <div className="flex justify-between items-center mb-1">
+              <span className="font-medium text-gray-700">Reason:</span>
+              <span className="text-gray-800">{delay.reason || 'Not specified'}</span>
+            </div>
+            <div className="flex justify-between items-center mb-1">
+              <span className="font-medium text-gray-700">Period:</span>
+              <span className="text-gray-800">
+                {delay.from ? formatDateTime(delay.from) : 'N/A'} -
+                {delay.to ? formatDateTime(delay.to) : 'N/A'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="font-medium text-gray-700">Duration:</span>
+              <span className="text-gray-800 font-semibold">
+                {delay.duration || formatDelayDuration(delay)} {/* Use delay.duration if available, fallback to calc */}
+              </span>
+            </div>
+            <div className="flex justify-end mt-2 space-x-2"> {/* Buttons for edit/delete */}
+              <IconButton size="small" onClick={() => editDelay(index)} color="primary" aria-label={`Edit delay ${index + 1}`}>
+                <EditIcon fontSize="small" />
+              </IconButton>
+              <IconButton size="small" onClick={() => removeDelay(index)} color="error" aria-label={`Remove delay ${index + 1}`}>
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
 
   // Grouping fields for better UI
   const getGroupedFields = () => {
     const groups = {
-      main: [],
-      wlSection: [], // For wlLoaded, wlPlaced, manualLoaded, numberOfSick
-      operatorSection: [], // For sr, wl, CRoomOPerator, ShiftIncharge
-      other: [],
+      main: [], // Operational/Vessel Info (now includes Material & Path)
+      operatorSection: [], // Responsible Persons
+      timeAnalysisSection: [], // Time Details (placement, clearance, start, stop, total, actual)
+      loadingDetailsSection: [], // Renamed from wlSection
+      remarksSection: [], // Remarks
     };
 
-    if (!formStructure) return groups;
+    if (!currentFormStructure) return groups;
 
-    Object.entries(formStructure).forEach(([fieldKey, fieldConfig]) => {
+    Object.entries(currentFormStructure).forEach(([fieldKey, fieldConfig]) => {
       if (fieldConfig.type === 'array') return; // Delays handled separately
 
-      if (['wlLoaded', 'wlPlaced', 'manualLoaded', 'numberOfSick', 'totalTon', 'average'].includes(fieldKey)) {
-        groups.wlSection.push({ fieldKey, fieldConfig });
-      } else if (['sr', 'wl', 'CRoomOPerator', 'ShiftIncharge'].includes(fieldKey)) {
-        groups.operatorSection.push({ fieldKey, fieldConfig });
-      } else {
+      // Combined into main for Operational/Vessel Info: date, rakeNo, Vessel_name, material, quantity, typeOfMaterial, path
+      if (['date', 'rakeNo', 'Vessel_name', 'material', 'quantity', 'typeOfMaterial', 'path'].includes(fieldKey)) {
         groups.main.push({ fieldKey, fieldConfig });
+      } else if (['ShiftIncharge', 'CRoomOPerator', 'sr', 'wl'].includes(fieldKey)) { // Operators
+        groups.operatorSection.push({ fieldKey, fieldConfig });
+      } else if (['placement', 'clearance', 'startTime', 'stopTime', 'totalTime', 'actualTime', 'berthing_time', 'completion_time', 'conv_start', 'total_time', 'u_validation'].includes(fieldKey)) { // Time fields
+        groups.timeAnalysisSection.push({ fieldKey, fieldConfig });
+      } else if (['wlLoaded', 'wlPlaced', 'manualLoaded', 'numberOfSick', 'totalTon', 'average'].includes(fieldKey)) { // Loading/Material fields
+        groups.loadingDetailsSection.push({ fieldKey, fieldConfig }); // Changed group name
+      } else if (fieldKey === 'remarks') {
+        groups.remarksSection.push({ fieldKey, fieldConfig });
       }
+      // Explicitly removed the 'other' group. Fields not in these categories will not be rendered.
     });
     return groups;
   };
@@ -374,197 +495,227 @@ const EditItemDialog = ({
   const groupedFields = getGroupedFields();
 
   return (
-    <ThemeProvider theme={lightTheme}>
-      <Dialog
-        open={open}
-        onClose={onClose}
-        fullWidth
-        maxWidth="md"
-        PaperProps={{
-          sx: {
-            borderRadius: 2,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
-            backgroundColor: (theme) => theme.palette.background.paper,
-            color: (theme) => theme.palette.text.primary,
-          },
-        }}
-      >
-        <DialogTitle sx={{
-          backgroundColor: (theme) => theme.palette.primary.main,
-          color: '#fff',
-          fontWeight: 'bold',
-          py: 1.5,
-          px: isMobile ? 1.5 : 3,
-          borderTopLeftRadius: 8,
-          borderTopRightRadius: 8,
-        }}>
-          {title}
-        </DialogTitle>
-        <DialogContent sx={{ p: isMobile ? 1.5 : 3, backgroundColor: (theme) => theme.palette.background.default }}>
-          <Box component="form" noValidate autoComplete="off" sx={{ '& .MuiTextField-root': { mb: 2 } }}>
-            {/* Main Fields Section */}
-            <Card variant="outlined" sx={{ mb: 3, p: 2, backgroundColor: (theme) => theme.palette.background.paper }}>
-              <Typography variant="h6" color="primary" sx={{ mb: 2 }}>General Information</Typography>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullWidth
+      maxWidth="md"
+      PaperProps={{
+        className: "rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-white",
+      }}
+    >
+      <DialogTitle className="bg-blue-600 text-white font-bold py-3 px-6 rounded-t-lg">
+        {title}
+      </DialogTitle>
+      <DialogContent className="p-6 overflow-y-auto bg-gray-50 flex-1">
+        <Box component="form" noValidate autoComplete="off" className="space-y-6">
+
+          {/* Operational/Vessel Information & Responsible Persons Section (First Row, two columns) */}
+          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            {groupedFields.main.length > 0 && (
+              <div className="bg-blue-50 p-5 rounded-lg">
+                <h3 className="text-lg font-semibold text-blue-800 mb-4">
+                  {collectionName === 'vessel_data' ? 'Vessel Information' : 'Operational Information'}
+                </h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {groupedFields.main.map(({ fieldKey, fieldConfig }) => (
+                    <div key={fieldKey}>
+                      {renderField(fieldKey, fieldConfig)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {groupedFields.operatorSection.length > 0 && (
+              <div className="bg-green-50 p-5 rounded-lg">
+                <h3 className="text-lg font-semibold text-green-800 mb-4">Responsible Persons</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {groupedFields.operatorSection.map(({ fieldKey, fieldConfig }) => (
+                    <div key={fieldKey}>
+                      {renderField(fieldKey, fieldConfig)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Delays Section (Second Row) */}
+          {currentFormStructure?.delays && (
+            <div className="bg-yellow-50 p-5 rounded-lg mb-6">
+              <Box className="flex items-center mb-4">
+                <Clock className="mr-2 text-yellow-800" size={20} /> {/* Clock icon */}
+                <Typography variant="h6" className="text-yellow-800 font-semibold">Delays</Typography>
+              </Box>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="body1" component="label" htmlFor="newDelayFrom" className="font-medium text-gray-600 mb-1 block">
+                    From (Date & Time):
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    variant="standard"
+                    type="datetime-local"
+                    name="from"
+                    id="newDelayFrom"
+                    value={newDelay.from}
+                    onChange={handleDelayChange}
+                    InputLabelProps={{ shrink: true, sx: { display: 'none' } }}
+                    InputProps={{
+                      disableUnderline: true,
+                      sx: {
+                        padding: '0 !important',
+                        '&.MuiInputBase-root': {
+                          '&:before': { borderBottom: 'none !important' },
+                          '&:after': { borderBottom: 'none !important' },
+                          '&:hover:not(.Mui-disabled):before': { borderBottom: 'none !important' },
+                        },
+                      },
+                      className: 'text-gray-800'
+                    }}
+                    sx={{ m: 0, '& .MuiInputBase-input': { padding: '0 !important' } }}
+                    aria-label="Delay start date and time"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="body1" component="label" htmlFor="newDelayTo" className="font-medium text-gray-600 mb-1 block">
+                    To (Date & Time):
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    variant="standard"
+                    type="datetime-local"
+                    name="to"
+                    id="newDelayTo"
+                    value={newDelay.to}
+                    onChange={handleDelayChange}
+                    InputLabelProps={{ shrink: true, sx: { display: 'none' } }}
+                    InputProps={{
+                      disableUnderline: true,
+                      sx: {
+                        padding: '0 !important',
+                        '&.MuiInputBase-root': {
+                          '&:before': { borderBottom: 'none !important' },
+                          '&:after': { borderBottom: 'none !important' },
+                          '&:hover:not(.Mui-disabled):before': { borderBottom: 'none !important' },
+                        },
+                      },
+                      className: 'text-gray-800'
+                    }}
+                    sx={{ m: 0, '& .MuiInputBase-input': { padding: '0 !important' } }}
+                    aria-label="Delay end date and time"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="body1" component="label" htmlFor="newDelayReason" className="font-medium text-gray-600 mb-1 block">
+                    Reason:
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    variant="standard"
+                    name="reason"
+                    id="newDelayReason"
+                    value={newDelay.reason}
+                    onChange={handleDelayChange}
+                    multiline
+                    rows={1}
+                    maxRows={6}
+                    InputLabelProps={{ shrink: true, sx: { display: 'none' } }}
+                    InputProps={{
+                      disableUnderline: true,
+                      sx: {
+                        padding: '0 !important',
+                        '&.MuiInputBase-root': {
+                          '&:before': { borderBottom: 'none !important' },
+                          '&:after': { borderBottom: 'none !important' },
+                          '&:hover:not(.Mui-disabled):before': { borderBottom: 'none !important' },
+                        },
+                      },
+                      className: 'text-gray-800'
+                    }}
+                    sx={{ m: 0, '& .MuiInputBase-input': { padding: '0 !important' } }}
+                    aria-label="Reason for delay"
+                  />
+                </Grid>
+                <Grid item xs={12} className="mt-2">
+                  <Typography variant="body2" className="text-gray-700 ml-1">
+                    Duration: {calculateDelayDuration(newDelay.from, newDelay.to)}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={addDelay}
+                    disabled={!newDelay.from || !newDelay.to || !newDelay.reason}
+                    className="mt-2 bg-blue-500 hover:bg-blue-600 text-white rounded-md shadow-md py-2 px-4"
+                    aria-label={editingDelayIndex !== null ? 'Update Delay' : 'Add Delay'}
+                  >
+                    {editingDelayIndex !== null ? 'Update Delay' : 'Add Delay'}
+                  </Button>
+                </Grid>
+              </Grid>
+
+              <Box className="mt-6">
+                {renderDelaysDisplay(delays)} {/* Use the new display function here */}
+              </Box>
+            </div>
+          )}
+
+          {/* Remarks Section (Third Row) */}
+          {groupedFields.remarksSection.length > 0 && (
+            <div className="bg-red-50 p-5 rounded-lg mb-6">
+              <h3 className="text-lg font-semibold text-red-800 mb-3">Remarks</h3>
+              {groupedFields.remarksSection.map(({ fieldKey, fieldConfig }) => (
+                <div key={fieldKey}>
+                  {renderField(fieldKey, fieldConfig)}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Loading Details Section (Fourth Row) */}
+          {groupedFields.loadingDetailsSection.length > 0 && (
+            <div className="bg-amber-50 p-5 rounded-lg mb-6">
+              <Box className="flex items-center mb-4">
+                <WarehouseIcon color="primary" className="mr-2 text-amber-800" />
+                <Typography variant="h6" className="text-amber-800 font-semibold">Loading Details</Typography> {/* Renamed heading */}
+              </Box>
               <Grid container spacing={2}>
-                {groupedFields.main.map(({ fieldKey, fieldConfig }) => (
+                {groupedFields.loadingDetailsSection.map(({ fieldKey, fieldConfig }) => (
                   <Grid item xs={12} sm={6} key={fieldKey}>
                     {renderField(fieldKey, fieldConfig)}
                   </Grid>
                 ))}
               </Grid>
-            </Card>
+            </div>
+          )}
 
-            {/* WL/Material Section (conditionally rendered) */}
-            {groupedFields.wlSection.length > 0 && (
-              <Card variant="outlined" sx={{ mb: 3, p: 2, backgroundColor: (theme) => theme.palette.background.paper }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <WarehouseIcon color="primary" sx={{ mr: 1 }} />
-                  <Typography variant="h6" color="primary">Material & Loading</Typography>
-                </Box>
-                <Grid container spacing={2}>
-                  {groupedFields.wlSection.map(({ fieldKey, fieldConfig }) => (
-                    <Grid item xs={12} sm={6} key={fieldKey}>
-                      {renderField(fieldKey, fieldConfig)}
-                    </Grid>
-                  ))}
-                </Grid>
-              </Card>
-            )}
+          {/* Time Details Section (Fifth Row) */}
+          {groupedFields.timeAnalysisSection.length > 0 && (
+            <div className="bg-purple-50 p-5 rounded-lg mb-6">
+              <h3 className="text-lg font-semibold text-purple-800 mb-4">Time Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {groupedFields.timeAnalysisSection.map(({ fieldKey, fieldConfig }) => (
+                  <div key={fieldKey}>
+                    {renderField(fieldKey, fieldConfig)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-            {/* Operators Section (conditionally rendered) */}
-            {groupedFields.operatorSection.length > 0 && (
-              <Card variant="outlined" sx={{ mb: 3, p: 2, backgroundColor: (theme) => theme.palette.background.paper }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <EngineeringIcon color="primary" sx={{ mr: 1 }} />
-                  <Typography variant="h6" color="primary">Operators</Typography>
-                </Box>
-                <Grid container spacing={2}>
-                  {groupedFields.operatorSection.map(({ fieldKey, fieldConfig }) => (
-                    <Grid item xs={12} sm={6} key={fieldKey}>
-                      {renderField(fieldKey, fieldConfig)}
-                    </Grid>
-                  ))}
-                </Grid>
-              </Card>
-            )}
-
-            {/* Delays Section (conditionally rendered if 'delays' is in formStructure) */}
-            {formStructure?.delays && (
-              <Card variant="outlined" sx={{ mt: 3, p: 2, backgroundColor: (theme) => theme.palette.background.paper }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <AccessTimeIcon color="primary" sx={{ mr: 1 }} />
-                  <Typography variant="h6" color="primary">Delays</Typography>
-                </Box>
-                <Grid container spacing={2} alignItems="center">
-                  <Grid item xs={12} sm={4}>
-                    <TextField
-                      fullWidth
-                      margin="dense"
-                      label="From (Date & Time)"
-                      type="datetime-local"
-                      name="from"
-                      value={newDelay.from}
-                      onChange={handleDelayChange}
-                      InputLabelProps={{ shrink: true }}
-                      aria-label="Delay start date and time"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <TextField
-                      fullWidth
-                      margin="dense"
-                      label="To (Date & Time)"
-                      type="datetime-local"
-                      name="to"
-                      value={newDelay.to}
-                      onChange={handleDelayChange}
-                      InputLabelProps={{ shrink: true }}
-                      aria-label="Delay end date and time"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <TextField
-                      fullWidth
-                      margin="dense"
-                      label="Reason"
-                      name="reason"
-                      value={newDelay.reason}
-                      onChange={handleDelayChange}
-                      multiline
-                      rows={1} // Start with 1 row, let it expand
-                      maxRows={6} // Max rows for expansion
-                      InputLabelProps={{ shrink: true }}
-                      aria-label="Reason for delay"
-                    />
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Typography variant="body2" color="textSecondary" sx={{ ml: 1 }}>
-                      Duration: {calculateDelayDuration(newDelay.from, newDelay.to)}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Button
-                      variant="contained"
-                      startIcon={<AddIcon />}
-                      onClick={addDelay}
-                      disabled={!newDelay.from || !newDelay.to || !newDelay.reason}
-                      sx={{ mt: 1 }}
-                      aria-label={editingDelayIndex !== null ? 'Update Delay' : 'Add Delay'}
-                    >
-                      {editingDelayIndex !== null ? 'Update Delay' : 'Add Delay'}
-                    </Button>
-                  </Grid>
-                </Grid>
-
-                <Box sx={{ mt: 3 }}>
-                  {delays.length > 0 ? (
-                    <TableContainer component={Paper} variant="outlined">
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow sx={{ backgroundColor: (theme) => theme.palette.action.hover }}>
-                            <TableCell>From</TableCell>
-                            <TableCell>To</TableCell>
-                            <TableCell>Reason</TableCell>
-                            <TableCell>Duration</TableCell>
-                            <TableCell>Actions</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {delays.map((delay, index) => (
-                            <TableRow key={index}>
-                              <TableCell>{delay.from ? new Date(delay.from).toLocaleString() : 'N/A'}</TableCell>
-                              <TableCell>{delay.to ? new Date(delay.to).toLocaleString() : 'N/A'}</TableCell>
-                              <TableCell>{delay.reason}</TableCell>
-                              <TableCell>{delay.duration}</TableCell>
-                              <TableCell>
-                                <IconButton size="small" onClick={() => editDelay(index)} color="primary" aria-label={`Edit delay ${index + 1}`}>
-                                  <EditIcon fontSize="small" />
-                                </IconButton>
-                                <IconButton size="small" onClick={() => removeDelay(index)} color="error" aria-label={`Remove delay ${index + 1}`}>
-                                  <DeleteIcon fontSize="small" />
-                                </IconButton>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  ) : (
-                    <Box sx={{ textAlign: 'center', py: 3, borderRadius: 1, backgroundColor: 'rgba(0,0,0,0.02)' }}>
-                      <Typography variant="body2" color="textSecondary">No delays recorded yet.</Typography>
-                    </Box>
-                  )}
-                </Box>
-              </Card>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: isMobile ? 1.5 : 2, py: 1.5, borderTop: '1px solid', borderColor: 'divider', backgroundColor: (theme) => theme.palette.background.default }}>
-          <Button onClick={onClose} variant="outlined" color="inherit" size="medium" aria-label="Cancel editing item">Cancel</Button>
-          <Button onClick={handleSave} variant="contained" size="medium" startIcon={<SaveIcon />} aria-label="Save updated item">Update Item</Button>
-        </DialogActions>
-      </Dialog>
-    </ThemeProvider>
+        </Box>
+      </DialogContent>
+      <DialogActions className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex justify-end space-x-3">
+        <Button onClick={onClose} variant="outlined" className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition duration-150 ease-in-out" aria-label="Cancel editing item">
+          Cancel
+        </Button>
+        <Button onClick={handleSave} variant="contained" startIcon={<SaveIcon />} className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition duration-150 ease-in-out" aria-label="Save updated item">
+          Update Item</Button>
+      </DialogActions>
+    </Dialog>
   );
 };
 

@@ -257,7 +257,7 @@ const Layout = ({ content, settings, userData, setUserData, showHeadder }) => {
         </header> } 
 
         {/* displayContent */}
-        <main className="flex-1 overflow-auto p-0">
+        <main className="flex-1 overflow-auto p-0 min-h-0">
           <div className="w-full">
             {displayContent}
           </div>

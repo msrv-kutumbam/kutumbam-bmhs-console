@@ -655,7 +655,7 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
           <p className="text-xs mt-1">Page {window.location.href}</p>
         </div>
       </div>
-    </div>
+    </div> 
   );
 };
 

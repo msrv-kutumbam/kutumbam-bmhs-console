@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getFirestore, collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDoc, setDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { app } from '../firebase-config';
 import {
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
@@ -18,7 +18,10 @@ import 'jspdf-autotable';
 import { MaterialReactTable, useMaterialReactTable } from 'material-react-table';
 import Report_betweenDates from './shortComponents/Report_betweenDates';
 import DetailsShowPopUP from './shortComponents/DetailsShowPopUP';
-
+import AddItemDialog from './shortComponents/AddItemDialog';
+import EditItemDialog from './shortComponents/EditItemDialog';
+// import ErrorBoundary from './Dev/ErrorBoundary';
+// import {AddItemDialog, EditItemDialog} from './shortComponents/ADD_EDIT';
 
 // Constants
 const COLUMN_NAME_MAPPING = {
@@ -35,36 +38,6 @@ const COLUMN_NAME_MAPPING = {
   sr: 'SR Operator', totalTon:'Total Ton', stopTime:'Stop Time', actualTime:'Actual Time',
   wl: 'WL Operator', startTime:'Start Time', totalTime:'Total TIme',
 };
-
-const themeStyles = {
-  dark: {
-    backgroundColor: '#1e1e1e',
-    textColor: '#d4d4d4',
-    paperBackground: '#252526',
-    buttonColor: '#569cd6',
-    buttonHoverColor: '#3c6d9e',
-    errorColor: '#ff4444',
-    tableHeaderColor: '#333333',
-    tableBorderColor: '#555555',
-    border: '1px solid #f8f8f8',
-    borderRadius: '5px',
-    boxShadow: '0px 0px 10px rgba(0, 0, 0, 0.2)',
-  },
-  light: {
-    backgroundColor: '#ffffff',
-    textColor: '#000000',
-    paperBackground: '#f5f5f5',
-    buttonColor: '#1976d2',
-    buttonHoverColor: '#115293',
-    errorColor: '#d32f2f',
-    tableHeaderColor: '#f0f0f0',
-    tableBorderColor: '#dddddd',
-    border: '1px solid #dddddd',
-    borderRadius: '5px',
-    boxShadow: '0px 0px 10px rgba(0, 0, 0, 0.1)',
-  },
-};
-
 // DataTable Component
 const DataTable = ({ 
   data, 
@@ -178,13 +151,60 @@ const DataTable = ({
                   textOverflow: 'ellipsis'
                 }}
               >
-                {row.original[col.accessorKey].length > 20 ? row.original[col.accessorKey].substring(0, 20) + '...' : row.original[col.accessorKey]}
+                {row?.original[col?.accessorKey]?.length > 20 ? row?.original[col?.accessorKey].substring(0, 20) + '...' : row?.original[col?.accessorKey]}
               </Box>
             </Tooltip>
           ),
         };
       }
-
+      // delay Field
+      if (col.accessorKey === 'delays') {
+        return {
+          ...columnConfig,
+          Cell: ({ row }) => {
+            const delays = row.original[col.accessorKey] || [];
+            
+            // Format the delays array for display
+            const formattedDelays = delays.map(delay => (
+              `${delay.reason || 'Unknown'}: ${delay.duration || 'N/A'}`
+            )).join(', ');
+      
+            return (
+              <Tooltip 
+                title={
+                  <Box>
+                    {delays.length === 0 ? 'No delays' : (
+                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                        {delays.map((delay, index) => (
+                          <li key={index}>
+                            <strong>Reason:</strong> {delay.reason || 'Unknown'}<br />
+                            <strong>Duration:</strong> {delay.duration || 'N/A'}<br />
+                            <strong>Date:</strong> {delay.date || 'Not specified'}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </Box>
+                }
+              >
+                <Box
+                  sx={{
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    color: delays.length === 0 ? 'success.main' : 'warning.main'
+                  }}
+                >
+                  {delays.length === 0 
+                    ? 'No delays' 
+                    : `${delays.length} delay${delays.length > 1 ? 's' : ''}`
+                  }
+                </Box>
+              </Tooltip>
+            );
+          },
+        };
+      }
       return columnConfig;
     }),
     {
@@ -240,7 +260,7 @@ const DataTable = ({
     enablePagination: true,
     enableRowSelection: false,
     initialState: { 
-      pagination: { pageSize: 5, pageIndex: 0 },
+      pagination: { pageSize: 10, pageIndex: 0 },
       density: 'compact', 
     },
     muiTableHeadCellProps: {
@@ -265,12 +285,19 @@ const DataTable = ({
         boxShadow: currentTheme.boxShadow 
       }}>
         <Typography
-          className="cursor-pointer"
           onClick={() => {
             navigate('/Main');
           }}
+          sx={{
+            cursor: 'pointer',
+            color: currentTheme.buttonColor, // Use a theme color for interactive text
+            '&:hover': {
+              textDecoration: 'underline',
+              color: currentTheme.buttonHoverColor, // Adjust hover color for better feedback
+            },
+          }}
         >
-          <a> No data available. Click here to redirect to Main. </a> 
+          No data available. Click here to redirect to the home page./Main  
         </Typography>
       </Box>  
     ),
@@ -437,7 +464,7 @@ const DataTable = ({
             Close
           </Button>
         </DialogActions>
-      </Dialog>
+      </Dialog> 
     </>
   );
 };
@@ -449,6 +476,33 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
   const queryParams = new URLSearchParams(location.search);
   const collectionName = queryParams.get('collection');
   const [data, setData] = useState(colletionsData[collectionName] || [] ); 
+ 
+  const dealyStrucure = {
+    type: "array",
+    label: "Delays",
+    itemStructure: {
+      from: {
+        type: "datetime-local",  // Changed from "time" to "datetime-local"
+        label: "From",
+        required: true
+      },
+      to: {
+        type: "datetime-local",  // Changed from "time" to "datetime-local"
+        label: "To",
+        required: true
+      },
+      reason: {
+        type: "text",
+        label: "Reason",
+        required: true
+      },
+      total: {
+        type: "text",
+        label: "Duration",
+        readonly: true
+      }
+    } 
+  }
 
   const formStructures = {
     vessel_data: {
@@ -459,21 +513,22 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       clearance: { type: 'datetime-local', label: 'Clearance Date-Time', required: true },
       conv_start: { type: 'datetime-local', label: 'Conveyor Start Date-Time', required: true },
       completion_time: { type: 'datetime-local', label: 'Completion Date-Time', required: true },
-      path: { type: 'text', structure:"array separated with coma", label: 'Path coma sepatated', required: true },
+      path: { type: 'text', structure:"array separated with coma", label: 'Path SR-SP-BAY&BAY, ', required: true },
       total_time: { type: 'text', structure:"nn:nn", label: 'Total Time 00:00', required: true },
-      remarks:{ type: 'textarea', label: 'Remarks', required: false, defaultValue: '' }
-    },
+      remarks:{ type: 'textarea', label: 'Remarks', required: false, defaultValue: '' },
+      delays: dealyStrucure,
+    }, 
     reclamationData: {
       date: { type: 'date', label: 'Date', required: true },
       rakeNo: { type: 'text', label: "RakeNo ED.00 00-00-00", required: true },
       typeOfMaterial: { type: 'text', structure:"array separated with coma", label: 'Type of Material', required: true },
-      path: { type: 'text', structure:"array separated with coma", label: 'Path', required: true },
+      path: { type: 'text', structure:"array separated with coma", label: 'Path SR-SP-BAY&BAY, ', required: true },
       totalTon: { type: 'number', structure:"nn:nn", label: 'Total Tonnage', required: true },
       average: { type: 'number', structure:"Avarage", label: 'Average', required: true },
-      placement: { type: 'time', label: 'Placement', required: true },
-      clearance: { type: 'time', label: 'Clearance', required: true },
-      startTime: { type: 'time', label: 'Start Time', required: true },
-      stopTime: { type: 'time', label: 'Stop Time', required: true },
+      placement: { type: 'datetime-local', label: 'Placement', required: true },
+      clearance: { type: 'datetime-local', label: 'Clearance', required: true },
+      startTime: { type: 'datetime-local', label: 'Start Time', required: true },
+      stopTime: { type: 'datetime-local', label: 'Stop Time', required: true },
       totalTime: { type: 'text', label: 'Total Time 00:00', required: true },
       actualTime: { type: 'text', label: 'Actual Time 00:00', required: true },
       wlPlaced: { default:0, type: 'number', label: 'WL Placed', required: true },
@@ -482,6 +537,9 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       wlLoaded: { default:0, type: 'number', label: 'WL Loaded', required: true },
       sr: { type: 'text', structure:"array separated with coma", label: 'SR oporator', required: true },
       wl: { type: 'text', structure:"array separated with coma", label: 'WL oporator', required: true },
+      CRoomOPerator: { type: 'text', structure:"array separated with coma", label: 'CRO', required: false },
+      ShiftIncharge: { type: 'text', structure:"array separated with coma", label: 'Shift Incharge', required: false },
+      delays: dealyStrucure,
       remarks:{ type: 'textarea', label: 'Remarks', required: false, defaultValue: '' }
     }
   };
@@ -492,7 +550,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
   }, [colletionsData, collectionName]);
 
   const [editingItem, setEditingItem] = useState(null);
-  const [newItem, setNewItem] = useState({});
+  // Removed: newItem and setNewItem state as AddItemDialog now manages its own state
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -544,7 +602,8 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
     setSnackbar({ open: true, message, severity });
   };
 
-  const handleAdd = async () => {
+  // Modified handleAdd to accept itemToAdd directly
+  const handleAdd = async (itemToAdd) => { // Accept itemToAdd as argument
     if (!canCreate()) {
       showSnackbar('You do not have permission to create items', 'error');
       return;
@@ -552,10 +611,10 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
 
     try {
       const collectionRef = collection(db, collectionName);
-      const docRef = await addDoc(collectionRef, newItem);
-      setData([...data, { id: docRef.id, ...newItem }]);
+      const docRef = await addDoc(collectionRef, itemToAdd); // Use itemToAdd here
+      setData([...data, { id: docRef.id, ...itemToAdd }]); // Use itemToAdd here
       setIsAddDialogOpen(false);
-      setNewItem({});
+      // Removed setNewItem({}) as newItem state is no longer used
       showSnackbar('Item added successfully');
     } catch (error) {
       showSnackbar('Error adding item', 'error');
@@ -563,18 +622,19 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
     }
   };
 
-  const handleUpdate = async () => {
+  // Modified handleUpdate to accept itemToUpdate directly
+  const handleUpdate = async (itemToUpdate) => {
     if (!canUpdate()) {
       showSnackbar('You do not have permission to update items', 'error');
       return;
     }
 
     try {
-      const docRef = doc(db, collectionName, editingItem.id);
-      const updateData = { ...editingItem, u_validation: editingItem.u_validation === 'true' };
+      const docRef = doc(db, collectionName, itemToUpdate.id); // Use itemToUpdate.id
+      const updateData = { ...itemToUpdate, u_validation: itemToUpdate.u_validation === 'true' }; // Use itemToUpdate
       delete updateData.id;
       await updateDoc(docRef, updateData);
-      setData(data.map((item) => (item.id === editingItem.id ? { ...editingItem } : item)));
+      setData(data.map((item) => (item.id === itemToUpdate.id ? { ...itemToUpdate } : item))); // Use itemToUpdate
       setIsEditDialogOpen(false);
       setEditingItem(null);
       showSnackbar('Item updated successfully');
@@ -589,16 +649,22 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       showSnackbar('You do not have permission to delete items', 'error');
       return;
     }
-
-    try {
-      const docRef = doc(db, collectionName, selectedId);
-      await deleteDoc(docRef);
+    const delCollectionName = `del_${collectionName}`;
+    try { 
+      const docRef = doc(db, collectionName, selectedId); 
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        throw new Error('Document does not exist');
+      } 
+      const delDocRef = doc(db, delCollectionName, selectedId); 
+      await setDoc(delDocRef, docSnap.data()); 
+      await deleteDoc(docRef); 
       setData(data.filter((item) => item.id !== selectedId));
       setIsDeleteDialogOpen(false);
-      showSnackbar('Item deleted successfully');
+      showSnackbar('Item moved to archive and deleted successfully');
     } catch (error) {
-      showSnackbar('Error deleting item', 'error');
-      console.error('Error deleting document: ', error);
+      showSnackbar('Error moving/deleting item', 'error');
+      console.error('Error in delete operation: ', error);
     }
   };
 
@@ -684,7 +750,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       accessorKey: field,
       header: COLUMN_NAME_MAPPING[field] || 
              field.charAt(0).toUpperCase() + field.slice(1).replace(/_/g, ' '),
-      size: 150,
+      size: 50,
     }));
   }, [fields]);
 
@@ -726,7 +792,6 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
   const handleEditClick = (item) => {
     if (item === null) {
       // Add new item
-      // setNewItem({});
       setIsAddDialogOpen(true);
     } else {
       // Edit existing item
@@ -819,73 +884,32 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       </Dialog>
 
       {/* Add Dialog */}
-      <Dialog open={isAddDialogOpen} onClose={() => setIsAddDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add New Item</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            {fields.map((field) => (
-              <TextField
-                required
-                type={formStructures?.[collectionName]?.[field]?.type || 'text'}
-                key={field}
-                label={ formStructures?.[collectionName]?.[field]?.label || field.charAt(0).toUpperCase() + field.slice(1)}
-                fullWidth
-                margin="normal"
-                multiline={field === "remarks"} // Enable textarea for "remarks"
-                rows={field === "remarks" ? 4 : 1} // Adjust rows for "remarks" (default: 1)
-                value={newItem[field] || ''}
-                defaultValue={formStructures?.[collectionName]?.[field]?.default || newItem[field]}
-                onChange={(e) =>
-                  setNewItem((prev) => ({
-                    ...prev,
-                    [field]: e.target.value,
-                  }))
-                }
-              />
-            ))}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleAdd} variant="contained">
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AddItemDialog
+        open={isAddDialogOpen}
+        onClose={() => setIsAddDialogOpen(false)}
+        fields={fields}
+        collectionName={collectionName}
+        formStructures={formStructures}
+        // Removed newItem and setNewItem props
+        handleAdd={handleAdd} 
+        // Optional:
+        title={collectionName} // defaults to "Add New Item"
+      /> 
 
-      {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onClose={() => setIsEditDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit Item</DialogTitle>
-        <DialogContent>
-        <Box sx={{ pt: 2 }}>
-          {editingItem &&
-            fields.map((field) => (
-              <TextField
-                key={field}
-                label={field.charAt(0).toUpperCase() + field.slice(1)}
-                fullWidth
-                margin="normal"
-                multiline={field === "remarks"} // Enable textarea for "remarks"
-                rows={field === "remarks" ? 4 : 1} // Adjust rows for "remarks" (default: 1)
-                value={editingItem[field] || ''}
-                onChange={(e) =>
-                  setEditingItem((prev) => ({
-                    ...prev,
-                    [field]: e.target.value,
-                  }))
-                }
-              />
-            ))}
-        </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleUpdate} variant="contained">
-            Update
-          </Button>
-        </DialogActions>
-      </Dialog>
-
+      {/* Edit Dialog */} 
+      {/* <ErrorBoundary> */}
+        <EditItemDialog
+          open={isEditDialogOpen}
+          onClose={() => setIsEditDialogOpen(false)}
+          editingItem={editingItem}
+          setEditingItem={setEditingItem}
+          fields={fields}
+          handleUpdate={handleUpdate} // Now passes the updated item directly
+          formStructure={formStructures[collectionName]} // Changed prop name to singular 'formStructure'
+          collectionName={collectionName}
+          title={editingItem?.rakeNo || editingItem?.Vessel_name || 'Edit Item'} // Safe title access
+        />
+      {/* </ErrorBoundary> */}
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onClose={() => setIsDeleteDialogOpen(false)}>
         <DialogTitle>Confirm Delete</DialogTitle>

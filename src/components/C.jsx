@@ -20,7 +20,7 @@ import Report_betweenDates from './shortComponents/Report_betweenDates';
 import DetailsShowPopUP from './shortComponents/DetailsShowPopUP';
 import AddItemDialog from './shortComponents/AddItemDialog';
 import EditItemDialog from './shortComponents/EditItemDialog';
-import ErrorBoundary from './Dev/ErrorBoundary';
+// import ErrorBoundary from './Dev/ErrorBoundary';
 // import {AddItemDialog, EditItemDialog} from './shortComponents/ADD_EDIT';
 
 // Constants
@@ -260,7 +260,7 @@ const DataTable = ({
     enablePagination: true,
     enableRowSelection: false,
     initialState: { 
-      pagination: { pageSize: 5, pageIndex: 0 },
+      pagination: { pageSize: 10, pageIndex: 0 },
       density: 'compact', 
     },
     muiTableHeadCellProps: {
@@ -285,12 +285,19 @@ const DataTable = ({
         boxShadow: currentTheme.boxShadow 
       }}>
         <Typography
-          className="cursor-pointer"
           onClick={() => {
             navigate('/Main');
           }}
+          sx={{
+            cursor: 'pointer',
+            color: currentTheme.buttonColor, // Use a theme color for interactive text
+            '&:hover': {
+              textDecoration: 'underline',
+              color: currentTheme.buttonHoverColor, // Adjust hover color for better feedback
+            },
+          }}
         >
-          <a> No data available. Click here to redirect to Main. </a> 
+          No data available. Click here to redirect to the home page./Main  
         </Typography>
       </Box>  
     ),
@@ -743,7 +750,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       accessorKey: field,
       header: COLUMN_NAME_MAPPING[field] || 
              field.charAt(0).toUpperCase() + field.slice(1).replace(/_/g, ' '),
-      size: 150,
+      size: 50,
     }));
   }, [fields]);
 

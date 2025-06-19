@@ -42,6 +42,15 @@ const DataAnalysis = ({ data, collectionName, themeStyles, settings }) => {
         return new Date(dateString + 'T00:00:00'); // Add time to ensure correct date parsing
     };
 
+    // Helper to format a Date object to YYYY-MM-DD string based on local time
+    const formatDateToYyyyMmDd = (dateObj) => {
+        if (!dateObj || isNaN(dateObj.getTime())) return 'N/A';
+        const year = dateObj.getFullYear();
+        const month = ('0' + (dateObj.getMonth() + 1)).slice(-2); // Months are 0-indexed
+        const day = ('0' + dateObj.getDate()).slice(-2);
+        return `${year}-${month}-${day}`;
+    };
+
     // Calculate overall start and end dates from the data
     let earliestDate = null;
     let latestDate = null;
@@ -74,9 +83,8 @@ const DataAnalysis = ({ data, collectionName, themeStyles, settings }) => {
         });
     });
 
-    const formattedStartDate = earliestDate ? earliestDate.toISOString().split('T')[0] : 'N/A';
-    const formattedEndDate = latestDate ? latestDate.toISOString().split('T')[0] : 'N/A';
-
+    const formattedStartDate = formatDateToYyyyMmDd(earliestDate);
+    const formattedEndDate = formatDateToYyyyMmDd(latestDate);
 
     // Common analysis logic for both collections
     const totalRakes = data?.length || 0;
@@ -253,13 +261,13 @@ const DataAnalysis = ({ data, collectionName, themeStyles, settings }) => {
         } finally {
             setIsSharing(false);
         }
-    };
+    }; 
 
     return (
         // Main container for the card, with a clean, modern look
         <div
             ref={cardRef} // Attach ref to the element we want to capture
-            className="bg-white shadow-lg rounded-xl p-6 md:p-8 w-full max-w-md border border-gray-100 relative" // Added relative for absolute positioning of share icon
+            className="bg-white shadow-lg rounded-xl p-6 md:p-8   border border-gray-100 relative" // Added relative for absolute positioning of share icon
             style={{
                 backgroundColor: themeStyles.paperBackground,
                 fontSize: settings.fontSize === 'small' ? '14px' : settings.fontSize === 'medium' ? '16px' : '18px',
