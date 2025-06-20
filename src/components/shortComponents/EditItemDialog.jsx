@@ -347,6 +347,12 @@ const EditItemDialog = ({
     const isCalculatedField = ['totalTime', 'actualTime', 'wlLoaded', 'average'].includes(fieldKey);
     const isReadOnly = isCalculatedField; // Only calculated fields are truly read-only in terms of direct input
 
+    const isRemarksField = fieldKey === 'remarks';
+
+    // Determine if the field should be a datetime-local input
+    const isDateTimeLocalField = ['placement', 'clearance', 'startTime', 'stopTime'].includes(fieldKey);
+
+
     // Styling for the TextField to make it appear as plain text but interactive
     const customInputProps = {
       disableUnderline: true, // Remove the standard Material-UI underline
@@ -355,17 +361,27 @@ const EditItemDialog = ({
         '&.MuiInputBase-root': {
           '&:before': { borderBottom: 'none !important' }, // Remove default underline
           '&:after': { borderBottom: 'none !important' }, // Remove focused underline
-          '&:hover:not(.Mui-disabled):before': { borderBottom: 'none !important' }, // Remove hover underline
+          '&:hover:not(.Mui-disabled):before': { borderBottom: 'none !important' },
+          ...(isRemarksField && {
+            alignItems: 'start', // Align text to top for textarea
+          }),
         },
       }
     };
 
     return (
-      <Box className="flex justify-between items-center mb-2"> {/* Tailwind styling for spacing and alignment */}
+      <Box className="flex justify-between items-start mb-2"> {/* Tailwind styling for spacing and alignment */}
         {/* Render the label as Typography for better control over styling like DetailsShowPopUP */}
-        <Typography variant="body1" component="label" htmlFor={fieldKey} className="font-medium text-gray-600 mr-2 w-full">
-          {fieldConfig.label}:
-        </Typography>
+        {fieldKey !== "remarks" && (
+          <Typography
+            variant="body1"
+            component="label"
+            htmlFor={fieldKey}
+            className="font-medium text-gray-600 mr-2 w-full"
+          >
+            {fieldConfig.label}:
+          </Typography>
+        )}
         <TextField
           fullWidth
           variant="standard" // Use standard variant to remove default borders/backgrounds easily
@@ -390,18 +406,27 @@ const EditItemDialog = ({
           InputProps={{ // Apply custom input props
             ...customInputProps,
             readOnly: isReadOnly, // Control editability here
-            className: `text-gray-800 ${isCalculatedField ? 'font-semibold' : ''} ${fieldConfig.type === 'datetime-local' || fieldConfig.type === 'date' ? 'text-right' : 'text-left'}` // Conditional styling
+            className: `text-gray-800 ${isCalculatedField ? 'font-semibold' : ''} text-left` // Conditional styling
           }}
-          type={fieldConfig.type === 'textarea' ? 'text' : fieldConfig.type} // Use type="text" for textarea visual
-          multiline={fieldConfig.type === 'textarea'} // Enable multiline for textarea
-          rows={fieldConfig.type === 'textarea' ? 1 : undefined} // Start with 1 row for textarea
-          maxRows={fieldConfig.type === 'textarea' ? 6 : undefined} // Max rows for textarea expansion
+          type={isDateTimeLocalField ? "datetime-local" : (fieldConfig.type === 'textarea' ? 'text' : fieldConfig.type)} // Use datetime-local or text/fieldConfig.type
+          multiline={isRemarksField}
+          rows={isRemarksField ? 3 : undefined}
+          maxRows={isRemarksField ? 8 : undefined}
           // Remove margin for the TextField component itself and handle spacing with parent Box
           sx={{
             m: 0,
+            minHeight: isRemarksField ? '80px' : undefined,
+            maxHeight: isRemarksField ? '100px' : undefined,
+            overflowY: isRemarksField ? 'auto' : undefined,
             '& .MuiInputBase-input': {
-              padding: '0 !important', // Ensures no padding inside the input text
-              minWidth: 'auto', // Allow input to shrink if needed
+              padding: '4px 8px !important', // Ensures no padding inside the input text
+              minWidth: isRemarksField ? '80px' : 'auto', // Set minWidth for remarks textarea
+              resize: 'vertical',
+              ...(isRemarksField && {
+                minHeight: '80px',
+                overflowY: 'auto',
+                maxHeight: '200px',
+              }),
             },
             // Hide the default label from TextField component, as we're rendering it with Typography
             '& .MuiInputLabel-root': {
@@ -544,9 +569,27 @@ const EditItemDialog = ({
           {/* Delays Section (Second Row) */}
           {currentFormStructure?.delays && (
             <div className="bg-yellow-50 p-5 rounded-lg mb-6">
-              <Box className="flex items-center mb-4">
+              <Box className="flex items-center mb-4 space-x-4"> {/* Added space-x-4 for spacing */}
                 <Clock className="mr-2 text-yellow-800" size={20} /> {/* Clock icon */}
                 <Typography variant="h6" className="text-yellow-800 font-semibold">Delays</Typography>
+
+                {/* Total number of delays */}
+                <Typography
+                  variant="body2"
+                  className="text-sm font-medium text-blue-700 bg-blue-100 px-3 py-1 rounded-full"
+                >
+                  Count: {delays.length}
+                </Typography>
+
+                {/* Total delay duration */}
+                <Typography
+                  variant="body2"
+                  className="text-sm font-medium text-red-700 bg-red-100 px-3 py-1 rounded-full"
+                >
+                  Total: {minutesToDuration(
+                    delays.reduce((sum, d) => sum + durationToMinutes(d.duration), 0)
+                  )}
+                </Typography>
               </Box>
               <Grid container spacing={2} alignItems="center">
                 <Grid item xs={12} sm={4}>
@@ -630,11 +673,20 @@ const EditItemDialog = ({
                           '&:before': { borderBottom: 'none !important' },
                           '&:after': { borderBottom: 'none !important' },
                           '&:hover:not(.Mui-disabled):before': { borderBottom: 'none !important' },
+                          alignItems: 'start',
                         },
                       },
                       className: 'text-gray-800'
                     }}
-                    sx={{ m: 0, '& .MuiInputBase-input': { padding: '0 !important' } }}
+                    sx={{
+                      m: 0,
+                      '& .MuiInputBase-input': {
+                        padding: '0 !important',
+                        minHeight: '80px',
+                        overflowY: 'auto',
+                        minWidth: '80px', // Set minWidth for reason textarea
+                      }
+                    }}
                     aria-label="Reason for delay"
                   />
                 </Grid>
