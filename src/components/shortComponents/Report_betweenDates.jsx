@@ -374,7 +374,7 @@ const DataAnalysis = ({ data, collectionName, themeStyles, settings }) => {
 const Report_betweenDates = ({ themeStyles, data, collectionName, settings }) => {
     return (
         // This div acts as the body/main container, centering its content
-        <div className="flex justify-center items-center min-h-screen bg-gray-100 p-4 md:p-8">
+        <div className="flex justify-center items-center  bg-gray-100 p-4 md:p-8">
             {/* The DataAnalysis card is rendered inside this centered container */}
             <DataAnalysis themeStyles={themeStyles} data={data} collectionName={collectionName} settings={settings} />
         </div>

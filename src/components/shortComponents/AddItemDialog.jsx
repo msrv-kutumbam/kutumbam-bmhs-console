@@ -331,15 +331,15 @@ const AddItemDialog = ({
 
   // Helper to render fields based on currentFormStructure
   const renderField = (fieldKey, fieldConfig) => {
-    const value = newItem[fieldKey] || ''; 
+    const value = newItem[fieldKey] || '';
 
     const isCalculatedField = ['totalTime', 'actualTime', 'wlLoaded', 'average'].includes(fieldKey);
     const isReadOnly = isCalculatedField;
 
     const isRemarksField = fieldKey === 'remarks';
 
-    // Determine if the field should be a datetime-local input
     const isDateTimeLocalField = ['placement', 'clearance', 'startTime', 'stopTime'].includes(fieldKey);
+    const isDateField = ['date', 'dateOnlyField2'].includes(fieldKey); // Add your field keys for date inputs
 
     const customInputProps = {
       disableUnderline: true,
@@ -350,14 +350,14 @@ const AddItemDialog = ({
           '&:after': { borderBottom: 'none !important' },
           '&:hover:not(.Mui-disabled):before': { borderBottom: 'none !important' },
           ...(isRemarksField && {
-            alignItems: 'start', // Align text to top for textarea
+            alignItems: 'start',
           }),
         },
       }
     };
 
     return (
-      <Box className="flex justify-between items-start mb-2"> {/* use items-start for top alignment on textarea */}
+      <Box className="flex justify-between items-start mb-2">
         {fieldKey !== "remarks" && (
           <Typography
             variant="body1"
@@ -367,8 +367,7 @@ const AddItemDialog = ({
           >
             {fieldConfig.label}:
           </Typography>
-        )} 
-
+        )}
         <TextField
           fullWidth
           variant="standard"
@@ -379,16 +378,18 @@ const AddItemDialog = ({
           required={fieldConfig.required}
           InputLabelProps={{
             shrink: true,
-            sx: {
-              display: 'none',
-            }
+            sx: { display: 'none' }
           }}
           InputProps={{
             ...customInputProps,
             readOnly: isReadOnly,
             className: `text-gray-800 ${isCalculatedField ? 'font-semibold' : ''} text-left`,
           }}
-          type={isDateTimeLocalField ? "datetime-local" : "text"} // Set type dynamically
+          type={
+            isDateTimeLocalField ? "datetime-local" :
+            isDateField ? "date" :
+            "text"
+          }
           multiline={isRemarksField}
           rows={isRemarksField ? 3 : undefined}
           maxRows={isRemarksField ? 8 : undefined}
@@ -416,6 +417,7 @@ const AddItemDialog = ({
       </Box>
     );
   };
+
 
 
   // Render Delays Section (Modified to match DetailsShowPopUP style)
@@ -505,7 +507,7 @@ const AddItemDialog = ({
       fullWidth
       maxWidth="md"
       PaperProps={{
-        className: "rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-white",
+        className: "rounded-lg shadow-lg w-full max-w-4xl max-h-[99vh] overflow-hidden flex flex-col bg-white",
       }}
     >
       <DialogTitle className="bg-blue-600 text-white font-bold py-3 px-6 rounded-t-lg">
