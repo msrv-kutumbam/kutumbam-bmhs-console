@@ -1,11 +1,35 @@
-import React, { useEffect, useRef } from 'react';
-import { X, Printer, Share2, Ship, Train, Clock, AlertTriangle } from 'lucide-react'; // Re-added Ship and Train icons
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { X, Printer, Share2, Ship, Train, Clock, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react'; // Re-added Ship and Train icons
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
-const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, collectionType }) => {
+// Helper to convert HH:mm duration string to minutes (copied from AddItemDialog)
+const durationToMinutes = (duration) => {
+  if (!duration || typeof duration !== 'string') return 0;
+  const parts = duration.split(':');
+  if (parts.length === 2) {
+    const hours = parseInt(parts[0], 10);
+    const minutes = parseInt(parts[1], 10);
+    if (!isNaN(hours) && !isNaN(minutes)) {
+      return hours * 60 + minutes;
+    }
+  }
+  return 0;
+};
+
+// Helper to convert minutes to HH:mm duration string (copied from AddItemDialog)
+const minutesToDuration = (totalMinutes) => {
+  if (isNaN(totalMinutes) || totalMinutes < 0) return '00:00';
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+
+const DetailsShowPopUP = ({ dataArray, initialIndex, isLoading = false, error = null, onClose, collectionType }) => {
   const popupRef = useRef(null);
-  
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const data = dataArray[currentIndex]; // Current data item being displayed
+
   // Handle escape key to close modal
   useEffect(() => {
     const handleEscapeKey = (e) => {
@@ -18,13 +42,27 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
     return () => document.removeEventListener('keydown', handleEscapeKey);
   }, [onClose]);
 
+  // Update currentIndex if initialIndex changes (e.g., when a new item is double-clicked)
+  useEffect(() => {
+    setCurrentIndex(initialIndex);
+  }, [initialIndex]);
+
+  // Navigation handlers
+  const handlePrevious = useCallback(() => {
+    setCurrentIndex(prevIndex => Math.max(0, prevIndex - 1));
+  }, []);
+
+  const handleNext = useCallback(() => {
+    setCurrentIndex(prevIndex => Math.min(dataArray.length - 1, prevIndex + 1));
+  }, [dataArray.length]);
+
   // Modified handle printing
   const handlePrint = () => {
     if (!popupRef.current) return;
 
     const printContent = popupRef.current.innerHTML;
     const printWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes');
-    printWindow.document.write('<html><head><title>Print Report</title>');
+    printWindow.document.write(`<html><head><title>Print Report ${data.rakeNo}</title>`);
     // Copy styles from the current document to the new window for proper rendering
     Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).forEach(node => {
       printWindow.document.write(node.outerHTML);
@@ -184,44 +222,51 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
 
   // Render Delays Section
   const renderDelays = (delays) => {
-    if (!delays || delays.length === 0) {
-      return (
-        <div className="bg-green-50 p-4 rounded-lg">
-          <p className="text-green-800 font-medium">No delays recorded</p>
-        </div>
-      );
-    }
+    const totalDelayMinutes = delays.reduce((sum, delay) => sum + durationToMinutes(delay.duration), 0);
+    const totalDelaysCount = delays.length;
 
     return (
       <div className="bg-yellow-50 p-4 rounded-lg">
         <h3 className="text-lg font-semibold text-yellow-800 mb-3 flex items-center">
           <Clock className="mr-2" size={20} />
-          Delays ({delays.length})
+          Delays
+          <span className="ml-4 text-sm font-medium text-blue-700 bg-blue-100 px-3 py-1 rounded-full">
+            Count: {totalDelaysCount}
+          </span>
+          <span className="ml-2 text-sm font-medium text-red-700 bg-red-100 px-3 py-1 rounded-full">
+            Total: {minutesToDuration(totalDelayMinutes)}
+          </span>
         </h3>
         
-        <div className="space-y-3">
-          {delays.map((delay, index) => (
-            <div key={index} className="border-l-4 border-yellow-500 pl-3 py-1">
-              <div className="flex justify-between">
-                <span className="font-medium text-gray-700">Reason:</span>
-                <span className="text-gray-800">{delay.reason || 'Not specified'}</span>
+        {totalDelaysCount === 0 ? (
+          <div className="bg-green-50 p-4 rounded-lg">
+            <p className="text-green-800 font-medium">No delays recorded</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {delays.map((delay, index) => (
+              <div key={index} className="border-l-4 border-yellow-500 pl-3 py-1">
+                <div className="flex justify-between">
+                  <span className="font-medium text-gray-700">Reason:</span>
+                  <span className="text-gray-800">{delay.reason || 'Not specified'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-medium text-gray-700">Period:</span>
+                  <span className="text-gray-800">
+                    {delay.from ? formatDateTime(delay.from) : 'N/A'} - 
+                    {delay.to ? formatDateTime(delay.to) : 'N/A'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-medium text-gray-700">Duration:</span>
+                  <span className="text-gray-800 font-semibold">
+                    {delay.total || formatDelayDuration(delay)}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="font-medium text-gray-700">Period:</span>
-                <span className="text-gray-800">
-                  {delay.from ? formatDateTime(delay.from) : 'N/A'} - 
-                  {delay.to ? formatDateTime(delay.to) : 'N/A'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="font-medium text-gray-700">Duration:</span>
-                <span className="text-gray-800 font-semibold">
-                  {delay.total || formatDelayDuration(delay)}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -271,8 +316,8 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
     );
   }
 
-  // Guard clause for missing data
-  if (!data) {
+  // Guard clause for missing data or empty dataArray
+  if (!data || dataArray.length === 0) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-lg">
@@ -590,6 +635,24 @@ const DetailsShowPopUP = ({ data, isLoading = false, error = null, onClose, coll
               </h2>
             </div>
             <div className="flex items-center space-x-3">
+              {/* Navigation Buttons */}
+              <button
+                onClick={handlePrevious}
+                disabled={currentIndex === 0}
+                className="p-1 rounded-full bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Previous Report"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <button
+                onClick={handleNext}
+                disabled={currentIndex === dataArray.length - 1}
+                className="p-1 rounded-full bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Next Report"
+              >
+                <ChevronRight size={20} />
+              </button>
+
               <button 
                 onClick={handleShare}
                 className="text-gray-600 hover:text-gray-800 focus:outline-none"

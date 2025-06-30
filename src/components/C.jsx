@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getFirestore, collection, addDoc, getDoc, setDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { app } from '../firebase-config';
+import { app } from '../firebase-config'; // Ensure this path is correct relative to your project structure
 import {
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Typography, Box, Snackbar, Alert, MenuItem, Select, FormControl,
@@ -16,16 +16,15 @@ import Papa from 'papaparse';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { MaterialReactTable, useMaterialReactTable } from 'material-react-table';
-import Report_betweenDates from './shortComponents/Report_betweenDates';
-import DetailsShowPopUP from './shortComponents/DetailsShowPopUP';
-import AddItemDialog from './shortComponents/AddItemDialog';
-import EditItemDialog from './shortComponents/EditItemDialog';
-// import ErrorBoundary from './Dev/ErrorBoundary';
-// import {AddItemDialog, EditItemDialog} from './shortComponents/ADD_EDIT';
+import Report_betweenDates from './shortComponents/Report_betweenDates'; // Ensure this path is correct
+import DetailsShowPopUP from './shortComponents/DetailsShowPopUP'; // Ensure this path is correct
+import AddItemDialog from './shortComponents/AddItemDialog'; // Ensure this path is correct
+import EditItemDialog from './shortComponents/EditItemDialog'; // Ensure this path is correct
+
 
 // Constants
 const COLUMN_NAME_MAPPING = {
-  Vessel_name: 'Vessel Name', 
+  Vessel_name: 'Vessel Name',
   quantity: 'Quantity',
   remarks: 'Notes',
   u_validation: 'Validation Status',
@@ -38,46 +37,31 @@ const COLUMN_NAME_MAPPING = {
   sr: 'SR Operator', totalTon:'Total Ton', stopTime:'Stop Time', actualTime:'Actual Time',
   wl: 'WL Operator', startTime:'Start Time', totalTime:'Total TIme',
 };
+
 // DataTable Component
-const DataTable = ({ 
-  data, 
+const DataTable = ({
+  data,
   setData,
-  fields, 
-  columns, 
-  collectionName, 
-  currentTheme, 
-  canCreate, 
-  canRead, 
-  canUpdate, 
-  canDelete, 
-  onEdit, 
-  onDelete, 
-  onOpenDownloadDialog, 
+  fields,
+  columns,
+  collectionName,
+  currentTheme,
+  canCreate,
+  canRead,
+  canUpdate,
+  canDelete,
+  onEdit,
+  onDelete,
+  onOpenDownloadDialog,
   navigate,
   startDateV,
   setStartDateV,
   endDateV,
   setEndDateV,
   fetchCollections,
-  settings, 
+  settings,
+  onRowDoubleClick, // Added new prop for double click, now correctly passed from C
 }) => {
-  const [detailPopup, setDetailPopup] = useState({ open: false, data: null });
-
-  const handleCopyData = () => {
-    navigator.clipboard.writeText(JSON.stringify(detailPopup.data, null, 2));
-    showSnackbar('Data copied to clipboard!');
-  };
-
-  const handleShareData = async () => {
-    try {
-      await navigator.share({
-        title: 'Record Details',
-        text: JSON.stringify(detailPopup.data, null, 2),
-      });
-    } catch (err) {
-      showSnackbar('Sharing failed: ' + err.message, 'error');
-    }
-  };
 
   const tableColumns = useMemo(() => [
     ...columns.map((col) => {
@@ -85,6 +69,46 @@ const DataTable = ({
         ...col,
         header: COLUMN_NAME_MAPPING[col.accessorKey] || col.header,
       };
+
+      // Apply different colors to important fields
+      const importantFields = ['rakeNo', 'Vessel_name', 'material', 'quantity', 'date'];
+      if (importantFields.includes(col.accessorKey)) {
+        columnConfig.muiTableBodyCellProps = ({ row }) => {
+          let backgroundColor = 'transparent';
+          let textColor = 'inherit';
+
+          // Example colors - adjust as needed
+          if (col.accessorKey === 'rakeNo') {
+            // backgroundColor = '#E3F2FD'; // Light Blue
+            textColor = '#ed6c02';
+          } else if (col.accessorKey === 'Vessel_name') {
+            // backgroundColor = '#FFF3E0'; // Light Orange
+            textColor = '#EF6C00';
+          } else if (col.accessorKey === 'material' || col.accessorKey === 'typeOfMaterial') { // 'material' for vessel, 'typeOfMaterial' for rake
+            // backgroundColor = '#E8F5E9'; // Light Green
+            textColor = '#2E7D32';
+          } else if (col.accessorKey === 'quantity') {
+            // backgroundColor = '#FBE9E7'; // Light Red/Pink
+            textColor = '#C62828';
+          } else if (col.accessorKey === 'date') {
+            // backgroundColor = '#E1F5FE'; // Lighter Blue
+            textColor = '#0277BD';
+          }
+
+          return {
+            sx: {
+              backgroundColor: backgroundColor,
+              color: textColor,
+              fontWeight: 'bold',
+              borderLeft: `1px solid ${backgroundColor}`, // Add a subtle border for separation
+              borderRight: `1px solid ${backgroundColor}`,
+              borderRadius: '4px', // Rounded corners for individual cells
+              padding: '8px 12px',
+            },
+          };
+        };
+      }
+
 
       // Base64 Image Handling
       if (col.accessorKey === 'profileImageUrl') {
@@ -106,8 +130,8 @@ const DataTable = ({
         return {
           ...columnConfig,
           Cell: ({ row }) => (
-            <Button 
-              variant="outlined" 
+            <Button
+              variant="outlined"
               size="small"
               onClick={() => window.open(row.original[col.accessorKey], '_blank')}
             >
@@ -143,8 +167,8 @@ const DataTable = ({
             <Tooltip title={row.original[col.accessorKey] || ''}>
               <Box
                 sx={{
-                  color: row.original[col.accessorKey]?.toLowerCase() === 'nill' 
-                    ? 'success.main' 
+                  color: row.original[col.accessorKey]?.toLowerCase() === 'nill'
+                    ? 'success.main'
                     : 'text.primary',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
@@ -163,14 +187,14 @@ const DataTable = ({
           ...columnConfig,
           Cell: ({ row }) => {
             const delays = row.original[col.accessorKey] || [];
-            
+
             // Format the delays array for display
             const formattedDelays = delays.map(delay => (
               `${delay.reason || 'Unknown'}: ${delay.duration || 'N/A'}`
             )).join(', ');
-      
+
             return (
-              <Tooltip 
+              <Tooltip
                 title={
                   <Box>
                     {delays.length === 0 ? 'No delays' : (
@@ -195,8 +219,8 @@ const DataTable = ({
                     color: delays.length === 0 ? 'success.main' : 'warning.main'
                   }}
                 >
-                  {delays.length === 0 
-                    ? 'No delays' 
+                  {delays.length === 0
+                    ? 'No delays'
                     : `${delays.length} delay${delays.length > 1 ? 's' : ''}`
                   }
                 </Box>
@@ -215,14 +239,14 @@ const DataTable = ({
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Tooltip title="View Details">
             <IconButton
-              onClick={() => setDetailPopup({ open: true, data: row.original })}
+              onClick={() => onRowDoubleClick(row.original)} // Directly use onRowDoubleClick prop
               color="primary"
               size="small"
             >
               <TextSnippetIcon />
             </IconButton>
           </Tooltip>
-          
+
           {canUpdate() && (
             <Tooltip title="Edit">
               <IconButton
@@ -234,7 +258,7 @@ const DataTable = ({
               </IconButton>
             </Tooltip>
           )}
-          
+
           {canDelete() && (
             <Tooltip title="Delete">
               <IconButton
@@ -249,7 +273,7 @@ const DataTable = ({
         </Box>
       ),
     },
-  ], [columns, canUpdate, canDelete, onEdit, onDelete]);
+  ], [columns, canUpdate, canDelete, onEdit, onDelete, onRowDoubleClick]); // Added onRowDoubleClick to dependencies
 
   // Configure the MaterialReactTable
   const table = useMaterialReactTable({
@@ -259,30 +283,30 @@ const DataTable = ({
     enableSorting: true,
     enablePagination: true,
     enableRowSelection: false,
-    initialState: { 
+    initialState: {
       pagination: { pageSize: 10, pageIndex: 0 },
-      density: 'compact', 
+      density: 'compact',
     },
     muiTableHeadCellProps: {
       sx: {
-        fontWeight: 'bold',  
-        backgroundColor: currentTheme.tableHeaderColor, 
-        color: currentTheme.textColor, 
-        border: currentTheme.border, 
-        borderRadius: currentTheme.borderRadius, 
-        boxShadow: currentTheme.boxShadow 
-      }, 
+        fontWeight: 'bold',
+        backgroundColor: currentTheme.tableHeaderColor,
+        color: currentTheme.textColor,
+        border: currentTheme.border,
+        borderRadius: currentTheme.borderRadius,
+        boxShadow: currentTheme.boxShadow
+      },
     },
     renderEmptyRowsFallback: () => (
-      <Box sx={{ 
-        display: 'flex', 
+      <Box sx={{
+        display: 'flex',
         // justifyContent: 'center',
         p: 2,
-        backgroundColor: currentTheme.tableHeaderColor, 
-        color: currentTheme.textColor, 
-        border: currentTheme.border, 
-        borderRadius: currentTheme.borderRadius, 
-        boxShadow: currentTheme.boxShadow 
+        backgroundColor: currentTheme.tableHeaderColor,
+        color: currentTheme.textColor,
+        border: currentTheme.border,
+        borderRadius: currentTheme.borderRadius,
+        boxShadow: currentTheme.boxShadow
       }}>
         <Typography
           onClick={() => {
@@ -297,20 +321,20 @@ const DataTable = ({
             },
           }}
         >
-          No data available. Click here to redirect to the home page./Main  
+          No data available. Click here to redirect to the home page./Main
         </Typography>
-      </Box>  
+      </Box>
     ),
     renderTopToolbarCustomActions: () => (
-      <Box sx={{ 
-        display: 'flex', 
-        gap: 2, 
+      <Box sx={{
+        display: 'flex',
+        gap: 2,
         p: 1,
-        backgroundColor: currentTheme.tableHeaderColor, 
-        color: currentTheme.textColor, 
-        border: currentTheme.border, 
-        borderRadius: currentTheme.borderRadius, 
-        boxShadow: currentTheme.boxShadow 
+        backgroundColor: currentTheme.tableHeaderColor,
+        color: currentTheme.textColor,
+        border: currentTheme.border,
+        borderRadius: currentTheme.borderRadius,
+        boxShadow: currentTheme.boxShadow
       }}>
         {canRead() && (
           <Button
@@ -328,166 +352,135 @@ const DataTable = ({
         )}
       </Box>
     ),
+    // Add onRowDoubleClick handler here
+    muiTableBodyRowProps: ({ row }) => ({
+      onDoubleClick: () => onRowDoubleClick(row.original),
+      sx: {
+        cursor: 'pointer', // Indicate it's clickable
+      },
+    }),
   });
 
   return (
     <>
-      <>
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          mb: 3, 
-          flexWrap: { xs: 'wrap', md: 'nowrap' },  
+      <Box sx={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        mb: 3,
+        flexWrap: { xs: 'wrap', md: 'nowrap' },
+        color: currentTheme.textColor
+      }}>
+        <Typography variant="h6" component="h1" sx={{
+          fontSize: 22,
+          flexBasis: { xs: '100%', md: 'auto' },
+          mb: { xs: 2, md: 0 },
           color: currentTheme.textColor
         }}>
-          <Typography variant="h6" component="h1" sx={{ 
-            fontSize: 22, 
-            flexBasis: { xs: '100%', md: 'auto' }, 
-            mb: { xs: 2, md: 0 }, 
-            color: currentTheme.textColor 
-          }}>
-            {collectionName?.charAt(0).toUpperCase() + collectionName?.slice(1)}
-          </Typography>  
-          <Box sx={{ 
-            display: 'flex', 
-            gap: 2, 
-            flexBasis: { xs: '100%', md: 'auto' }, 
-            alignItems: 'center',  
-            color: currentTheme.textColor
-          }}>
-            <TextField
-              type="date"
-              value={startDateV}
-              onChange={(e) => setStartDateV(e.target.value)}
-              sx={{ 
-                width: { xs: '45%', md: '30%' }, 
-                '& .MuiInputBase-root': { 
-                  height: 36, 
-                  backgroundColor: currentTheme.paperBackground, 
-                  color: currentTheme.textColor,
-                  border: currentTheme.border,
-                },
-              }}
-            />
-            <TextField
-              type="date"
-              value={endDateV}
-              onChange={(e) => setEndDateV(e.target.value)}
-              sx={{ 
-                width: { xs: '45%', md: '30%' }, 
-                '& .MuiInputBase-root': { 
-                  height: 36, 
-                  backgroundColor: currentTheme.paperBackground, 
-                  color: currentTheme.textColor,
-                  border: currentTheme.border, 
-                },
-              }}
-            />
-            <Button
-              variant="contained"
-              onClick={() => { 
-                setData([]) ;
-                fetchCollections(collectionName, startDateV, endDateV);
-              }}
-              sx={{ 
-                width: { xs: '10%', md: '10%' }, 
-                height: 36, 
-                minWidth: 'fit-content', 
-                backgroundColor: currentTheme.buttonColor, 
-                color: currentTheme.textColor, 
-                '&:hover': { 
-                  backgroundColor: currentTheme.buttonHoverColor 
-                }
-              }}
-            > 
-              Go 
-            </Button>
-          </Box>
+          {collectionName?.charAt(0).toUpperCase() + collectionName?.slice(1)}
+        </Typography>
+        <Box sx={{
+          display: 'flex',
+          gap: 2,
+          flexBasis: { xs: '100%', md: 'auto' },
+          alignItems: 'center',
+          color: currentTheme.textColor
+        }}>
+          <TextField
+            type="date"
+            value={startDateV}
+            onChange={(e) => setStartDateV(e.target.value)}
+            sx={{
+              width: { xs: '45%', md: '30%' },
+              '& .MuiInputBase-root': {
+                height: 36,
+                backgroundColor: currentTheme.paperBackground,
+                color: currentTheme.textColor,
+                border: currentTheme.border,
+              },
+            }}
+          />
+          <TextField
+            type="date"
+            value={endDateV}
+            onChange={(e) => setEndDateV(e.target.value)}
+            sx={{
+              width: { xs: '45%', md: '30%' },
+              '& .MuiInputBase-root': {
+                height: 36,
+                backgroundColor: currentTheme.paperBackground,
+                color: currentTheme.textColor,
+                border: currentTheme.border,
+              },
+            }}
+          />
+          <Button
+            variant="contained"
+            onClick={() => {
+              setData([]) ;
+              fetchCollections(collectionName, startDateV, endDateV);
+            }}
+            sx={{
+              width: { xs: '10%', md: '10%' },
+              height: 36,
+              minWidth: 'fit-content',
+              backgroundColor: currentTheme.buttonColor,
+              color: currentTheme.textColor,
+              '&:hover': {
+                backgroundColor: currentTheme.buttonHoverColor
+              }
+            }}
+          >
+            Go
+          </Button>
         </Box>
+      </Box>
 
-        {/* MaterialReactTable Component */}
-        <MaterialReactTable 
-          table={table} 
-          sx={{
-            backgroundColor: currentTheme.backgroundColor, 
-            color: currentTheme.textColor, 
-            border: currentTheme.border, 
-            borderRadius: currentTheme.borderRadius, 
-            boxShadow: currentTheme.boxShadow 
-          }}
-        />
+      {/* MaterialReactTable Component */}
+      <MaterialReactTable
+        table={table}
+        sx={{
+          backgroundColor: currentTheme.backgroundColor,
+          color: currentTheme.textColor,
+          border: currentTheme.border,
+          borderRadius: currentTheme.borderRadius,
+          boxShadow: currentTheme.boxShadow
+        }}
+      />
 
-        {/* Analytical data */}
-        <Report_betweenDates 
-          themeStyles={currentTheme} 
-          settings={settings} 
-          data={data} 
-          collectionName={collectionName} 
-        />
-      </>
-      
-      {/* Detail Popup */}
-      <Dialog open={detailPopup.open} onClose={() => setDetailPopup({ open: false, data: null })}>
-        <DialogTitle>Record Details</DialogTitle>
-        <DialogContent>
-          <Paper sx={{ p: 2, minWidth: 300 }}>
-            {detailPopup.data && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}> 
-                <DetailsShowPopUP 
-                  data ={detailPopup.data}  
-                  onClose={() => setDetailPopup({ open: false, data: null })}
-                  isLoading = {false}
-                  error = {null}
-                  collectionType ={collectionName}
-                />
-
-              </Box>
-            )}
-          </Paper>
-        </DialogContent>
-        <DialogActions>
-          <Button 
-            startIcon={<ContentCopy />} 
-            onClick={handleCopyData}
-          >
-            Copy
-          </Button>
-          <Button 
-            startIcon={<Share />} 
-            onClick={handleShareData}
-            disabled={!navigator.share}
-          >
-            Share
-          </Button>
-          <Button onClick={() => setDetailPopup({ open: false, data: null })}>
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog> 
+      {/* Analytical data */}
+      <Report_betweenDates
+        themeStyles={currentTheme}
+        settings={settings}
+        data={data}
+        collectionName={collectionName}
+      />
     </>
   );
 };
 
 // Main Component
 function C({ settings, setShowHeadder, userData, fetchCollections, colletionsData }) {
-  const location = useLocation(); 
+  const location = useLocation();
   const navigate = useNavigate();
   const queryParams = new URLSearchParams(location.search);
   const collectionName = queryParams.get('collection');
-  const [data, setData] = useState(colletionsData[collectionName] || [] ); 
- 
+  const [data, setData] = useState(colletionsData[collectionName] || [] );
+
+  // Moved detailPopup state to the C component's scope
+  const [detailPopup, setDetailPopup] = useState({ open: false, data: null, currentIndex: -1 });
+
   const dealyStrucure = {
     type: "array",
     label: "Delays",
     itemStructure: {
       from: {
-        type: "datetime-local",  // Changed from "time" to "datetime-local"
+        type: "datetime-local",
         label: "From",
         required: true
       },
       to: {
-        type: "datetime-local",  // Changed from "time" to "datetime-local"
+        type: "datetime-local",
         label: "To",
         required: true
       },
@@ -501,7 +494,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
         label: "Duration",
         readonly: true
       }
-    } 
+    }
   }
 
   const formStructures = {
@@ -509,6 +502,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       Vessel_name :{ type: 'text', label: 'Vessel Name', required: true },
       material: { type: 'text', label: 'Materials', required: true },
       quantity: { type: 'number', label: 'Quantity', required: true },
+      // Ensured these are datetime-local
       berthing_time: { type: 'datetime-local', label: 'Berthing Date-Time', required: true },
       clearance: { type: 'datetime-local', label: 'Clearance Date-Time', required: true },
       conv_start: { type: 'datetime-local', label: 'Conveyor Start Date-Time', required: true },
@@ -517,7 +511,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       total_time: { type: 'text', structure:"nn:nn", label: 'Total Time 00:00', required: true },
       remarks:{ type: 'textarea', label: 'Remarks', required: false, defaultValue: '' },
       delays: dealyStrucure,
-    }, 
+    },
     reclamationData: {
       date: { type: 'date', label: 'Date', required: true },
       rakeNo: { type: 'text', label: "RakeNo ED.00 00-00-00", required: true },
@@ -545,12 +539,11 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
   };
 
   useEffect(() => {
-    setData(colletionsData[collectionName] || []); 
+    setData(colletionsData[collectionName] || []);
     // console.log( "colletionsData --", colletionsData)
   }, [colletionsData, collectionName]);
 
   const [editingItem, setEditingItem] = useState(null);
-  // Removed: newItem and setNewItem state as AddItemDialog now manages its own state
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -562,12 +555,12 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isDownloadDialogOpen, setIsDownloadDialogOpen] = useState(false);
-  
-  // From to dates  
-  const [startDateV, setStartDateV] = useState(() => { 
-    return localStorage.getItem(`${collectionName}-startDate`) || ''; 
+
+  // From to dates
+  const [startDateV, setStartDateV] = useState(() => {
+    return localStorage.getItem(`${collectionName}-startDate`) || '';
   });
-  const [endDateV, setEndDateV] = useState(() => { 
+  const [endDateV, setEndDateV] = useState(() => {
     return localStorage.getItem(`${collectionName}-endDate`) || '';
   });
   useEffect(() => {
@@ -580,11 +573,11 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
   }, [startDateV, endDateV, collectionName]);
 
   const db = getFirestore(app);
-  useEffect(() => { 
+  useEffect(() => {
     setShowHeadder(false);
   }, []);
 
-  const fields = useMemo(() => {  
+  const fields = useMemo(() => {
     if (collectionName === "reclamationData" || collectionName === "vessel_data") {
       return Object.keys(formStructures[collectionName]);
     } else {
@@ -650,15 +643,15 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       return;
     }
     const delCollectionName = `del_${collectionName}`;
-    try { 
-      const docRef = doc(db, collectionName, selectedId); 
+    try {
+      const docRef = doc(db, collectionName, selectedId);
       const docSnap = await getDoc(docRef);
       if (!docSnap.exists()) {
         throw new Error('Document does not exist');
-      } 
-      const delDocRef = doc(db, delCollectionName, selectedId); 
-      await setDoc(delDocRef, docSnap.data()); 
-      await deleteDoc(docRef); 
+      }
+      const delDocRef = doc(db, delCollectionName, selectedId);
+      await setDoc(delDocRef, docSnap.data());
+      await deleteDoc(docRef);
       setData(data.filter((item) => item.id !== selectedId));
       setIsDeleteDialogOpen(false);
       showSnackbar('Item moved to archive and deleted successfully');
@@ -685,13 +678,13 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
     showSnackbar('CSV downloaded successfully');
   };
 
-  // Download as PDF 
+  // Download as PDF
   const downloadPDF = () => {
     if (!canRead()) {
       showSnackbar('You do not have permission to download data', 'error');
       return;
     }
-  
+
     // Mapping of original column names to custom names
     const headerNameMapping = {
       manualLoaded: 'Manual',
@@ -701,19 +694,19 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       numberOfSick: 'sick',
       // Add more mappings as needed
     };
-  
+
     // Transform the selectedColumns to custom header names
     const customHeaders = selectedColumns.map((col) => {
       return headerNameMapping[col] || col.charAt(0).toUpperCase() + col.slice(1);
     });
-  
+
     const filteredData = filterData(data);
     const doc = new jsPDF();
     doc.autoTable({
       head: [customHeaders], // Use the custom headers here
       body: filteredData.map((row) => selectedColumns.map((col) => row[col])),
     });
-    doc.save(`${collectionName}_${new Date().toISOString()}.pdf`); 
+    doc.save(`${collectionName}_${new Date().toISOString()}.pdf`);
     showSnackbar('PDF downloaded successfully');
   };
 
@@ -745,10 +738,10 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
   // Enhanced columns with renamed headers
   const columns = useMemo(() => {
     if (fields.length === 0) return [];
-    
+
     return fields.map((field) => ({
       accessorKey: field,
-      header: COLUMN_NAME_MAPPING[field] || 
+      header: COLUMN_NAME_MAPPING[field] ||
              field.charAt(0).toUpperCase() + field.slice(1).replace(/_/g, ' '),
       size: 50,
     }));
@@ -782,7 +775,7 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
       boxShadow: '0px 0px 10px rgba(0, 0, 0, 0.1)',
     },
   };
-  
+
   const currentTheme = settings.theme === 'dark' ? themeStyles.dark : themeStyles.light;
 
   const handleOpenDownloadDialog = () => {
@@ -805,10 +798,37 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
     setIsDeleteDialogOpen(true);
   };
 
+  // Handle double click on a row to open details popup
+  const handleRowDoubleClick = useCallback((rowData) => {
+    const index = data.findIndex(item => item.id === rowData.id);
+    setSnackbar({ open: false, message: '' }); // Clear any existing snackbar
+    setSnackbar({ open: true, message: `Opening details for: ${rowData.rakeNo || rowData.Vessel_name || 'Item'}`, severity: 'info' });
+    // Open the detail popup with the clicked row's data and its index
+    setDetailPopup({ open: true, data: rowData, currentIndex: index });
+  }, [data, setDetailPopup, showSnackbar]); // Added setDetailPopup to dependencies
+
+
+  const handleCopyData = () => {
+    navigator.clipboard.writeText(JSON.stringify(detailPopup.data, null, 2));
+    showSnackbar('Data copied to clipboard!');
+  };
+
+  const handleShareData = async () => {
+    try {
+      await navigator.share({
+        title: 'Record Details',
+        text: JSON.stringify(detailPopup.data, null, 2),
+      });
+    } catch (err) {
+      showSnackbar('Sharing failed: ' + err.message, 'error');
+    }
+  };
+
+
   return (
     <Box sx={{ p: 2 }}>
       {/* Data Table Component */}
-      <DataTable 
+      <DataTable
         data={data}
         setData={setData}
         fields={fields}
@@ -828,7 +848,8 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
         endDateV={endDateV}
         setEndDateV={setEndDateV}
         fetchCollections={fetchCollections}
-        settings={settings} 
+        settings={settings}
+        onRowDoubleClick={handleRowDoubleClick} // Pass the new handler
       />
 
       {/* Download Dialog */}
@@ -891,12 +912,12 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
         collectionName={collectionName}
         formStructures={formStructures}
         // Removed newItem and setNewItem props
-        handleAdd={handleAdd} 
+        handleAdd={handleAdd}
         // Optional:
         title={collectionName} // defaults to "Add New Item"
-      /> 
+      />
 
-      {/* Edit Dialog */} 
+      {/* Edit Dialog */}
       {/* <ErrorBoundary> */}
         <EditItemDialog
           open={isEditDialogOpen}
@@ -938,6 +959,46 @@ function C({ settings, setShowHeadder, userData, fetchCollections, colletionsDat
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Detail Popup - Rendered here using the state from C component */}
+      <Dialog open={detailPopup.open} onClose={() => setDetailPopup({ open: false, data: null, currentIndex: -1 })} fullWidth maxWidth="lg">
+        {/* DialogTitle, DialogContent, DialogActions should be part of this Dialog */}
+        <DialogTitle>Record Details</DialogTitle>
+        <DialogContent>
+          <Paper sx={{ p: 2, minWidth: 300 }}>
+            {detailPopup.data && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <DetailsShowPopUP
+                  dataArray={data} // Pass the entire data array
+                  initialIndex={detailPopup.currentIndex} // Pass the index of the current item
+                  onClose={() => setDetailPopup({ open: false, data: null, currentIndex: -1 })}
+                  isLoading = {false}
+                  error = {null}
+                  collectionType ={collectionName}
+                />
+              </Box>
+            )}
+          </Paper>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            startIcon={<ContentCopy />}
+            onClick={handleCopyData}
+          >
+            Copy
+          </Button>
+          <Button
+            startIcon={<Share />}
+            onClick={handleShareData}
+            disabled={!navigator.share}
+          >
+            Share
+          </Button>
+          <Button onClick={() => setDetailPopup({ open: false, data: null, currentIndex: -1 })}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

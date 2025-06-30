@@ -338,8 +338,8 @@ const AddItemDialog = ({
 
     const isRemarksField = fieldKey === 'remarks';
 
-    const isDateTimeLocalField = ['placement', 'clearance', 'startTime', 'stopTime'].includes(fieldKey);
-    const isDateField = ['date', 'dateOnlyField2'].includes(fieldKey); // Add your field keys for date inputs
+    const isDateTimeLocalField = fieldConfig.type === 'datetime-local';
+    const isDateField = fieldConfig.type === 'date'; // Add your field keys for date inputs
 
     const customInputProps = {
       disableUnderline: true,
