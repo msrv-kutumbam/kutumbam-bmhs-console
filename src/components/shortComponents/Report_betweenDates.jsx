@@ -421,7 +421,7 @@ const Report_betweenDates = ({ themeStyles, data, collectionName, settings }) =>
             <div className="max-w-6xl mx-auto">
                 <DataAnalysis 
                     themeStyles={themeStyles} 
-                    data={data} 
+                    data={data}  
                     collectionName={collectionName} 
                     settings={settings}
                 />
