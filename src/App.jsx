@@ -259,7 +259,7 @@ function App() {
           <Route path="/error" element={<Error errorMsg={errorMsg} />} />
           <Route path="/Charts" element={<Layout showHeadder={showHeadder} setUserData={setUserData} userData={userData} content={<ChatOut setShowHeadder={setShowHeadder} />} settings={settings} />} />
           <Route path="/Js-Plasyground" element={<JSPlayground />} />
-          <Route path="/ChatComponent" element={<ChatComponent />} />
+          <Route path="/ChatComponent" element={<ChatComponent user={userData} />} />
           <Route path="/Files" element={<Files />} />
         </Routes>
       </BrowserRouter>
