@@ -4,10 +4,14 @@ import {
   VideoCameraIcon,
   BellIcon,
   BellSlashIcon,
-  XMarkIcon
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 
-const MoreOptionsDropdown = ({ setShowMoreOptions, notificationPermission, toggleNotificationPermission }) => {
+const MoreOptionsDropdown = ({
+  setShowMoreOptions,
+  notificationPermission,
+  toggleNotificationPermission,
+}) => {
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -16,27 +20,33 @@ const MoreOptionsDropdown = ({ setShowMoreOptions, notificationPermission, toggl
         setShowMoreOptions(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [setShowMoreOptions]);
 
   return (
     <div
       ref={dropdownRef}
-      className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 overflow-hidden"
+      className="fixed right-4 top-16 w-52 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 z-[9999] overflow-hidden"
     >
       <div className="py-1">
         <button
           className="flex items-center w-full px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-sm"
-          onClick={() => { alert("Starting a call..."); setShowMoreOptions(false); }} // Replace with actual call logic
+          onClick={() => {
+            console.log('Starting a call...'); // Replaced alert()
+            setShowMoreOptions(false);
+          }}
         >
           <PhoneIcon className="w-5 h-5 mr-2" /> Start Call
         </button>
         <button
           className="flex items-center w-full px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-sm"
-          onClick={() => { alert("Starting a video call..."); setShowMoreOptions(false); }} // Replace with actual video call logic
+          onClick={() => {
+            console.log('Starting a video call...'); // Replaced alert()
+            setShowMoreOptions(false);
+          }}
         >
           <VideoCameraIcon className="w-5 h-5 mr-2" /> Start Video Call
         </button>
@@ -59,7 +69,7 @@ const MoreOptionsDropdown = ({ setShowMoreOptions, notificationPermission, toggl
         </button>
       </div>
     </div>
-  );  
+  );
 };
 
 export default MoreOptionsDropdown;

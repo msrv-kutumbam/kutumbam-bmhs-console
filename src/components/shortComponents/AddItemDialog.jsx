@@ -101,6 +101,11 @@ const AddItemDialog = ({
   const [isClearanceManuallySet, setIsClearanceManuallySet] = useState(false);
   const [isStartTimeManuallySet, setIsStartTimeManuallySet] = useState(false);
   const [isStopTimeManuallySet, setIsStopTimeManuallySet] = useState(false);
+  // New state for vessel_data specific manual overrides
+  const [isBerthingTimeManuallySet, setIsBerthingTimeManuallySet] = useState(false);
+  const [isCompletionTimeManuallySet, setIsCompletionTimeManuallySet] = useState(false);
+  const [isConvStartManuallySet, setIsConvStartManuallySet] = useState(false);
+
 
   // Get the specific form structure for the current collection
   const currentFormStructure = formStructures[collectionName];
@@ -118,6 +123,9 @@ const AddItemDialog = ({
           setIsClearanceManuallySet(false);
           setIsStartTimeManuallySet(false);
           setIsStopTimeManuallySet(false);
+          setIsBerthingTimeManuallySet(false);
+          setIsCompletionTimeManuallySet(false);
+          setIsConvStartManuallySet(false);
         } else {
           // If no draft, initialize numeric fields to 0
           const initialNumericValues = {};
@@ -145,6 +153,9 @@ const AddItemDialog = ({
       setIsClearanceManuallySet(false);
       setIsStartTimeManuallySet(false);
       setIsStopTimeManuallySet(false);
+      setIsBerthingTimeManuallySet(false);
+      setIsCompletionTimeManuallySet(false);
+      setIsConvStartManuallySet(false);
     }
   }, [open, collectionName, currentFormStructure]); // Re-run when dialog opens/closes or collection changes
 
@@ -205,11 +216,25 @@ const AddItemDialog = ({
     }
   }, [newItem.startTime, isStopTimeManuallySet, newItem.stopTime]);
 
+  // Vessel Data: berthing_time -> conv_start
+  useEffect(() => {
+    if (collectionName === 'vessel_data' && newItem.berthing_time && !isConvStartManuallySet && !newItem.conv_start) {
+      setNewItem(prev => ({ ...prev, conv_start: newItem.berthing_time }));
+    }
+  }, [collectionName, newItem.berthing_time, isConvStartManuallySet, newItem.conv_start]);
+
+  // Vessel Data: conv_start -> completion_time
+  useEffect(() => {
+    if (collectionName === 'vessel_data' && newItem.conv_start && !isCompletionTimeManuallySet && !newItem.completion_time) {
+      setNewItem(prev => ({ ...prev, completion_time: newItem.conv_start }));
+    }
+  }, [collectionName, newItem.conv_start, isCompletionTimeManuallySet, newItem.completion_time]);
+
 
   // --- Calculated Fields ---
-  // Calculate total_time (stopTime - startTime)
+  // Calculate totalTime (stopTime - startTime) for reclamationData
   useEffect(() => {
-    if (newItem.startTime && newItem.stopTime) {
+    if (collectionName === 'reclamationData' && newItem.startTime && newItem.stopTime) {
       const start = new Date(newItem.startTime);
       const stop = new Date(newItem.stopTime);
       if (!isNaN(start.getTime()) && !isNaN(stop.getTime())) {
@@ -219,18 +244,43 @@ const AddItemDialog = ({
       } else {
         setNewItem(prev => ({ ...prev, totalTime: '00:00' }));
       }
-    } else {
+    } else if (collectionName === 'reclamationData') {
       setNewItem(prev => ({ ...prev, totalTime: '00:00' }));
     }
-  }, [newItem.startTime, newItem.stopTime]);
+  }, [newItem.startTime, newItem.stopTime, collectionName]);
+
+  // Calculate total_time (completion_time - conv_start) for vessel_data
+  useEffect(() => {
+    if (collectionName === 'vessel_data' && newItem.conv_start && newItem.completion_time) {
+      const start = new Date(newItem.conv_start);
+      const completion = new Date(newItem.completion_time);
+      if (!isNaN(start.getTime()) && !isNaN(completion.getTime())) {
+        const diffMs = completion - start;
+        const totalMinutes = Math.floor(diffMs / (1000 * 60));
+        setNewItem(prev => ({ ...prev, total_time: minutesToDuration(totalMinutes) }));
+      } else {
+        setNewItem(prev => ({ ...prev, total_time: '00:00' }));
+      }
+    } else if (collectionName === 'vessel_data') {
+      setNewItem(prev => ({ ...prev, total_time: '00:00' }));
+    }
+  }, [newItem.conv_start, newItem.completion_time, collectionName]);
+
 
   // Calculate actualTime (totalTime - sum of all delays)
   useEffect(() => {
-    const totalTimeMinutes = durationToMinutes(newItem.totalTime);
+    const totalTimeKey = collectionName === 'vessel_data' ? 'total_time' : 'totalTime';
+    const currentTotalTime = newItem[totalTimeKey];
+
+    const totalTimeMinutes = durationToMinutes(currentTotalTime);
     const sumOfDelaysMinutes = delays.reduce((sum, delay) => sum + durationToMinutes(delay.duration), 0);
     const actualTimeMinutes = totalTimeMinutes - sumOfDelaysMinutes;
-    setNewItem(prev => ({ ...prev, actualTime: minutesToDuration(actualTimeMinutes) }));
-  }, [newItem.totalTime, delays]);
+
+    if (collectionName === 'reclamationData') {
+      setNewItem(prev => ({ ...prev, actualTime: minutesToDuration(actualTimeMinutes) }));
+    }
+    // Note: vessel_data does not have an 'actualTime' field based on the form structure provided in C.jsx
+  }, [newItem.totalTime, newItem.total_time, delays, collectionName]);
 
   // Calculate wlLoaded (wlPlaced - manualLoaded - numberOfSick)
   useEffect(() => {
@@ -260,6 +310,11 @@ const AddItemDialog = ({
     if (name === 'clearance') setIsClearanceManuallySet(true);
     if (name === 'startTime') setIsStartTimeManuallySet(true);
     if (name === 'stopTime') setIsStopTimeManuallySet(true);
+    // New manual override flags for vessel_data
+    if (name === 'berthing_time') setIsBerthingTimeManuallySet(true);
+    if (name === 'conv_start') setIsConvStartManuallySet(true);
+    if (name === 'completion_time') setIsCompletionTimeManuallySet(true);
+
 
     setNewItem((prev) => ({
       ...prev,
@@ -333,7 +388,8 @@ const AddItemDialog = ({
   const renderField = (fieldKey, fieldConfig) => {
     const value = newItem[fieldKey] || '';
 
-    const isCalculatedField = ['totalTime', 'actualTime', 'wlLoaded', 'average'].includes(fieldKey);
+    // Determine if the field is calculated and should be readOnly
+    const isCalculatedField = ['totalTime', 'actualTime', 'wlLoaded', 'average', 'total_time'].includes(fieldKey);
     const isReadOnly = isCalculatedField;
 
     const isRemarksField = fieldKey === 'remarks';

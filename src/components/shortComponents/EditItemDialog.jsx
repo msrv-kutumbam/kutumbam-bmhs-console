@@ -136,6 +136,10 @@ const EditItemDialog = ({
   const [isClearanceManuallySet, setIsClearanceManuallySet] = useState(false);
   const [isStartTimeManuallySet, setIsStartTimeManuallySet] = useState(false);
   const [isStopTimeManuallySet, setIsStopTimeManuallySet] = useState(false);
+  // New state for vessel_data specific manual overrides
+  const [isBerthingTimeManuallySet, setIsBerthingTimeManuallySet] = useState(false);
+  const [isCompletionTimeManuallySet, setIsCompletionTimeManuallySet] = useState(false);
+  const [isConvStartManuallySet, setIsConvStartManuallySet] = useState(false);
 
 
   // Effect to load draft data or initial item data on dialog open/editingItem change
@@ -156,6 +160,9 @@ const EditItemDialog = ({
         setIsClearanceManuallySet(false);
         setIsStartTimeManuallySet(false);
         setIsStopTimeManuallySet(false);
+        setIsBerthingTimeManuallySet(false);
+        setIsCompletionTimeManuallySet(false);
+        setIsConvStartManuallySet(false);
       } catch (e) {
         console.error("Failed to load draft from localStorage:", e);
         // Fallback to initial item data on error
@@ -171,6 +178,9 @@ const EditItemDialog = ({
       setIsClearanceManuallySet(false);
       setIsStartTimeManuallySet(false);
       setIsStopTimeManuallySet(false);
+      setIsBerthingTimeManuallySet(false);
+      setIsCompletionTimeManuallySet(false);
+      setIsConvStartManuallySet(false);
     }
   }, [open, editingItem, localStorageKey, collectionName]); // Depend on relevant props for re-initialization
 
@@ -231,11 +241,25 @@ const EditItemDialog = ({
     }
   }, [localEditingItem.startTime, isStopTimeManuallySet, localEditingItem.stopTime]);
 
+  // Vessel Data: berthing_time -> conv_start
+  useEffect(() => {
+    if (collectionName === 'vessel_data' && localEditingItem.berthing_time && !isConvStartManuallySet && !localEditingItem.conv_start) {
+      setLocalEditingItem(prev => ({ ...prev, conv_start: localEditingItem.berthing_time }));
+    }
+  }, [collectionName, localEditingItem.berthing_time, isConvStartManuallySet, localEditingItem.conv_start]);
+
+  // Vessel Data: conv_start -> completion_time
+  useEffect(() => {
+    if (collectionName === 'vessel_data' && localEditingItem.conv_start && !isCompletionTimeManuallySet && !localEditingItem.completion_time) {
+      setLocalEditingItem(prev => ({ ...prev, completion_time: localEditingItem.conv_start }));
+    }
+  }, [collectionName, localEditingItem.conv_start, isCompletionTimeManuallySet, localEditingItem.completion_time]);
+
 
   // --- Calculated Fields ---
-  // Calculate total_time (stopTime - startTime)
+  // Calculate totalTime (stopTime - startTime) for reclamationData
   useEffect(() => {
-    if (localEditingItem.startTime && localEditingItem.stopTime) {
+    if (collectionName === 'reclamationData' && localEditingItem.startTime && localEditingItem.stopTime) {
       const start = new Date(localEditingItem.startTime);
       const stop = new Date(localEditingItem.stopTime);
       if (!isNaN(start.getTime()) && !isNaN(stop.getTime())) {
@@ -245,18 +269,44 @@ const EditItemDialog = ({
       } else {
         setLocalEditingItem(prev => ({ ...prev, totalTime: '00:00' }));
       }
-    } else {
+    } else if (collectionName === 'reclamationData') {
       setLocalEditingItem(prev => ({ ...prev, totalTime: '00:00' }));
     }
-  }, [localEditingItem.startTime, localEditingItem.stopTime]);
+  }, [localEditingItem.startTime, localEditingItem.stopTime, collectionName]);
+
+  // Calculate total_time (completion_time - conv_start) for vessel_data
+  useEffect(() => {
+    if (collectionName === 'vessel_data' && localEditingItem.conv_start && localEditingItem.completion_time) {
+      const start = new Date(localEditingItem.conv_start);
+      const completion = new Date(localEditingItem.completion_time);
+      if (!isNaN(start.getTime()) && !isNaN(completion.getTime())) {
+        const diffMs = completion - start;
+        const totalMinutes = Math.floor(diffMs / (1000 * 60));
+        setLocalEditingItem(prev => ({ ...prev, total_time: minutesToDuration(totalMinutes) }));
+      } else {
+        setLocalEditingItem(prev => ({ ...prev, total_time: '00:00' }));
+      }
+    } else if (collectionName === 'vessel_data') {
+      setLocalEditingItem(prev => ({ ...prev, total_time: '00:00' }));
+    }
+  }, [localEditingItem.conv_start, localEditingItem.completion_time, collectionName]);
+
 
   // Calculate actualTime (totalTime - sum of all delays)
   useEffect(() => {
-    const totalTimeMinutes = durationToMinutes(localEditingItem.totalTime);
+    const totalTimeKey = collectionName === 'vessel_data' ? 'total_time' : 'totalTime';
+    const currentTotalTime = localEditingItem[totalTimeKey];
+
+    const totalTimeMinutes = durationToMinutes(currentTotalTime);
     const sumOfDelaysMinutes = delays.reduce((sum, delay) => sum + durationToMinutes(delay.duration), 0);
     const actualTimeMinutes = totalTimeMinutes - sumOfDelaysMinutes;
-    setLocalEditingItem(prev => ({ ...prev, actualTime: minutesToDuration(actualTimeMinutes) }));
-  }, [localEditingItem.totalTime, delays]);
+
+    if (collectionName === 'reclamationData') {
+      setLocalEditingItem(prev => ({ ...prev, actualTime: minutesToDuration(actualTimeMinutes) }));
+    }
+    // Note: vessel_data does not have an 'actualTime' field based on the form structure provided in C.jsx
+  }, [localEditingItem.totalTime, localEditingItem.total_time, delays, collectionName]);
+
 
   // Calculate wlLoaded (wlPlaced - manualLoaded - numberOfSick)
   useEffect(() => {
@@ -286,6 +336,11 @@ const EditItemDialog = ({
     if (name === 'clearance') setIsClearanceManuallySet(true);
     if (name === 'startTime') setIsStartTimeManuallySet(true);
     if (name === 'stopTime') setIsStopTimeManuallySet(true);
+    // New manual override flags for vessel_data
+    if (name === 'berthing_time') setIsBerthingTimeManuallySet(true);
+    if (name === 'conv_start') setIsConvStartManuallySet(true);
+    if (name === 'completion_time') setIsCompletionTimeManuallySet(true);
+
 
     setLocalEditingItem((prev) => ({
       ...prev,
@@ -344,13 +399,13 @@ const EditItemDialog = ({
     const value = localEditingItem[fieldKey] || '';
 
     // Determine if the field is calculated and should be readOnly
-    const isCalculatedField = ['totalTime', 'actualTime', 'wlLoaded', 'average'].includes(fieldKey);
+    const isCalculatedField = ['totalTime', 'actualTime', 'wlLoaded', 'average', 'total_time'].includes(fieldKey);
     const isReadOnly = isCalculatedField; // Only calculated fields are truly read-only in terms of direct input
 
     const isRemarksField = fieldKey === 'remarks';
 
     // Determine if the field should be a datetime-local input
-    const isDateTimeLocalField = ['placement', 'clearance', 'startTime', 'stopTime'].includes(fieldKey);
+    const isDateTimeLocalField = fieldConfig.type === 'datetime-local';
 
 
     // Styling for the TextField to make it appear as plain text but interactive

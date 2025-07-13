@@ -22,11 +22,11 @@ const Layout = ({ content, settings, userData, setUserData, showHeadder }) => {
     { icon: '💬', label: 'ChatComponent' },    
     { icon: '🔍', label: 'Search' },
     { icon: '⚙️', label: 'Settings' },
-    userData?.for === "DEV" ?  { icon: '🗂️', label: 'Files' } : null ,
-    userData?.for === "DEV" ?  { icon: '⚠️', label: 'Error' } : null ,
-    userData?.for === "DEV" ?  { icon: '🎭', label: 'Js-Plasyground' } : null ,
+    // userData?.for === "DEV" ?  { icon: '🗂️', label: 'Files' } : null ,
+    // userData?.for === "DEV" ?  { icon: '⚠️', label: 'Error' } : null ,
+    // userData?.for === "DEV" ?  { icon: '🎭', label: 'Js-Plasyground' } : null ,
     userData?.for === "DEV" ?  { icon: '📊', label: 'Charts' } : null ,
-    userData?.for === "DEV" ?  { icon: '🔔', label: 'Notifications' } : null ,
+    // userData?.for === "DEV" ?  { icon: '🔔', label: 'Notifications' } : null ,
   ];
 
   const [profileImage, setProfileImage] = useState( userData?.profileImageUrl || null )
