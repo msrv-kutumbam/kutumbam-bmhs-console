@@ -31,7 +31,8 @@ import PinnedMessagesModal from './PinnedMessagesModal';
 import OnlineUsersModal from './OnlineUsersModal';
 import DeleteConfirmModal from './DeleteConfirmModal'; // New: Delete Confirmation Modal
 
-const ChatComponent = ({ user }) => {
+// Add markAllMessagesAsSeen to props
+const ChatComponent = ({ user, markAllMessagesAsSeen }) => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -176,6 +177,15 @@ const ChatComponent = ({ user }) => {
 
   // Initial message load and real-time updates
   useEffect(() => {
+    // --- DEBUGGING LOG ---
+    console.log("ChatComponent: Setting up messages listener. User ID:", user?.id, "DB instance:", db);
+    if (!db) {
+      console.error("Firestore DB instance is not available in ChatComponent!");
+      setLoadingInitialMessages(false);
+      return; // Prevent query if db is not ready
+    }
+    // --- END DEBUGGING LOG ---
+
     setLoadingInitialMessages(true);
     const initialQuery = query(collection(db, 'messages'), orderBy('timestamp', 'desc'), limit(20));
 
@@ -203,6 +213,7 @@ const ChatComponent = ({ user }) => {
       setHasMoreMessages(snapshot.size === 20);
       setLoadingInitialMessages(false);
 
+      // Mark messages as seen when they are loaded and displayed
       fetchedMessages.forEach(async (msg) => {
         if (user?.id && msg.uid !== user.id && (!msg.seenBy || !msg.seenBy.includes(user.id))) {
           try {
@@ -219,7 +230,7 @@ const ChatComponent = ({ user }) => {
       setLoadingInitialMessages(false);
     });
     return unsubscribe;
-  }, [user, notificationPermission]); // Added notificationPermission to dependencies
+  }, [user, notificationPermission, db]); // Added db to dependencies
 
   // Load more messages when scrolling up
   const loadMoreMessages = useCallback(async () => {
@@ -254,7 +265,7 @@ const ChatComponent = ({ user }) => {
     } finally {
       setLoadingMoreMessages(false);
     }
-  }, [hasMoreMessages, loadingMoreMessages, lastVisibleMessage]);
+  }, [hasMoreMessages, loadingMoreMessages, lastVisibleMessage, db]); // Added db to dependencies
 
   useEffect(() => {
     const messagesContainer = messagesStartRef.current;
@@ -263,9 +274,13 @@ const ChatComponent = ({ user }) => {
       if (!loadingMoreMessages && (isScrolledToBottom || messages.length <= 20)) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         setNewMessagesNotification(false);
+        // Call markAllMessagesAsSeen when scrolled to bottom or initial load
+        if (markAllMessagesAsSeen) {
+          markAllMessagesAsSeen();
+        }
       }
     }
-  }, [messages, loadingMoreMessages]);
+  }, [messages, loadingMoreMessages, markAllMessagesAsSeen]);
 
 
   const sendMessage = async () => {
@@ -390,7 +405,10 @@ const ChatComponent = ({ user }) => {
       }
     } else {
       console.warn("Cannot delete message older than 5 minutes.");
-      alert("You can only delete messages within 5 minutes of sending.");
+      // Using a custom modal/message box instead of alert()
+      // You would replace this with a state-driven modal for user feedback
+      // For now, logging to console.
+      console.log("You can only delete messages within 5 minutes of sending.");
     }
     setShowDeleteConfirmModal(false);
     setMessageToDelete(null);
@@ -449,6 +467,10 @@ const ChatComponent = ({ user }) => {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     setNewMessagesNotification(false);
+    // Call markAllMessagesAsSeen when user manually scrolls to bottom
+    if (markAllMessagesAsSeen) {
+      markAllMessagesAsSeen();
+    }
   };
 
   // --- Notification Logic ---
@@ -476,8 +498,9 @@ const ChatComponent = ({ user }) => {
     }
 
     if (notificationPermission === 'granted') {
-      alert("To stop notifications, please go to your browser settings and revoke permission for this site.");
-      setNotificationPermission('denied');
+      // Using console.log instead of alert()
+      console.log("To stop notifications, please go to your browser settings and revoke permission for this site.");
+      setNotificationPermission('denied'); // Set to denied locally, user must change in browser
     } else if (notificationPermission === 'denied') {
       const permission = await Notification.requestPermission();
       setNotificationPermission(permission);
@@ -619,7 +642,7 @@ const ChatComponent = ({ user }) => {
         setShowPinnedMessagesModal={setShowPinnedMessagesModal}
         pinnedMessages={pinnedMessages}
         formatDetailedTimestamp={formatDetailedTimestamp}
-        togglePin={togglePin}  
+        togglePin={togglePin}
       />
 
       <OnlineUsersModal

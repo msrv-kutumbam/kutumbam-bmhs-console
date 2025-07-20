@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react'; 
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from "react-router-dom";
 import BackButton from './shortComponents/BackButton';
-import Profil from './shortComponents/Profil'; 
+import Profil from './shortComponents/Profil';
+import ChatBoxCard from './main/ChatBoxCard'; // Import the new ChatBoxCard
 
-const Layout = ({ content, settings, userData, setUserData, showHeadder }) => {
+// Add onlineUsersCount and newMessagesCount to props
+const Layout = ({ content, settings, userData, setUserData, showHeadder, onlineUsersCount, newMessagesCount }) => {
   const navigate = useNavigate();
   const [displayContent, setDisplayContent] = useState(content);
 
@@ -18,54 +20,51 @@ const Layout = ({ content, settings, userData, setUserData, showHeadder }) => {
 
   const menuItems = [
     { icon: '🏠', label: 'Main' },
-    { icon: '🗑️', label: 'Delete', action: () => setIsDeleteModalOpen(true) },
-    { icon: '💬', label: 'ChatComponent' },    
+    { icon: '🗑️', label: 'Clear LocalStorage', action: () => setIsDeleteModalOpen(true) },
+    { icon: '💬', label: 'ChatComponent' },
     { icon: '🔍', label: 'Search' },
     { icon: '⚙️', label: 'Settings' },
-    // userData?.for === "DEV" ?  { icon: '🗂️', label: 'Files' } : null ,
-    // userData?.for === "DEV" ?  { icon: '⚠️', label: 'Error' } : null ,
-    // userData?.for === "DEV" ?  { icon: '🎭', label: 'Js-Plasyground' } : null ,
-    userData?.for === "DEV" ?  { icon: '📊', label: 'Charts' } : null ,
-    // userData?.for === "DEV" ?  { icon: '🔔', label: 'Notifications' } : null ,
+    userData?.for === "DEV" ? { icon: '📊', label: 'Charts' } : null,
   ];
 
-  const [profileImage, setProfileImage] = useState( userData?.profileImageUrl || null )
-  const [avatar, setAvatar] = useState( "👤")
-  const [serchInput, setSerchInput] = useState("")
+  const [profileImage, setProfileImage] = useState(userData?.profileImageUrl || null);
+  const [avatar, setAvatar] = useState("👤");
+  const [serchInput, setSerchInput] = useState("");
 
   function filterCollections(data, searchKeyword) {
     function filterData(data, searchKeyword) {
-        if (Array.isArray(data)) {
-            const filteredArray = data
-                .map(item => filterData(item, searchKeyword))
-                .filter(item => item !== undefined);
-            return filteredArray.length > 0 ? filteredArray : undefined;
-        } else if (typeof data === 'object' && data !== null) {
-            let hasMatch = false;
-            const filteredObject = {};
-            for (const key in data) {
-                if (data.hasOwnProperty(key)) {
-                    const filteredValue = filterData(data[key], searchKeyword);
-                    if (filteredValue !== undefined) {
-                        filteredObject[key] = filteredValue;
-                        hasMatch = true;
-                    }
-                }
+      if (Array.isArray(data)) {
+        const filteredArray = data
+          .map(item => filterData(item, searchKeyword))
+          .filter(item => item !== undefined);
+        return filteredArray.length > 0 ? filteredArray : undefined;
+      } else if (typeof data === 'object' && data !== null) {
+        let hasMatch = false;
+        const filteredObject = {};
+        for (const key in data) {
+          if (data.hasOwnProperty(key)) {
+            const filteredValue = filterData(data[key], searchKeyword);
+            if (filteredValue !== undefined) {
+              filteredObject[key] = filteredValue;
+              hasMatch = true;
             }
-            return hasMatch ? { ...data, ...filteredObject } : undefined;
-        } else {
-            if (String(data).toLowerCase().includes(searchKeyword.toLowerCase())) {
-                return data;
-            }
-            return undefined;
+          }
         }
+        return hasMatch ? { ...data, ...filteredObject } : undefined;
+      } else {
+        if (String(data).toLowerCase().includes(searchKeyword.toLowerCase())) {
+          return data;
+        }
+        return undefined;
+      }
     }
     const filteredData = filterData(data, searchKeyword);
     return filteredData !== undefined ? filteredData : {};
   }
 
-  const searchEngine = (p) => { 
-    const data = content.props;
+  const searchEngine = (p) => {
+    // Check if content and content.props exist before accessing
+    const data = content && content.props ? content.props : {};
     const target = p.target.value.replace(/[^a-zA-Z0-9\s]/g, '');
     setSerchInput(target);
     const result = filterCollections(data, target);
@@ -78,7 +77,7 @@ const Layout = ({ content, settings, userData, setUserData, showHeadder }) => {
   const handleLogout = () => {
     console.log("Logging out...");
     localStorage.clear();
-    setUserData({})
+    setUserData({});
     setIsLogoutModalOpen(false);
   };
 
@@ -88,11 +87,18 @@ const Layout = ({ content, settings, userData, setUserData, showHeadder }) => {
   };
 
   useEffect(() => {
-    setDisplayContent(content);
-  }, [content]);
+    // When content prop changes, update displayContent
+    // Also, inject onlineUsersCount and newMessagesCount into the content's props
+    // if content is a React element (which it is for Home)
+    if (React.isValidElement(content)) {
+      setDisplayContent(React.cloneElement(content, { onlineUsersCount, newMessagesCount }));
+    } else {
+      setDisplayContent(content);
+    }
+  }, [content, onlineUsersCount, newMessagesCount]); // Re-run when counts change
 
   const Sidebar = () => (
-    <div 
+    <div
       style={{ overflowX: "auto" }}
       className={`flex md:flex-col ${isSidebarOpen ? 'md:w-64' : 'md:w-20'} transition-all duration-300 ${settings.theme === 'dark' ? 'bg-gray-800 text-white' : 'bg-white text-gray-800'}`}
     >
@@ -104,7 +110,7 @@ const Layout = ({ content, settings, userData, setUserData, showHeadder }) => {
         }} className="p-2 hover:bg-gray-100 rounded-lg hidden md:block">
           {isSidebarOpen ? '◀️' : '▶️'}
         </button>
-      </div> 
+      </div>
 
       <nav className="flex-1 md:pt-4 flex md:flex-col">
         {menuItems.filter(Boolean).map((item, index) => (
@@ -165,9 +171,9 @@ const Layout = ({ content, settings, userData, setUserData, showHeadder }) => {
       </aside>
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        { showHeadder &&  <header className={`h-16 gap-1 flex items-center justify-between px-4 py-3 ${settings.theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        {showHeadder && <header className={`h-16 gap-1 flex items-center justify-between px-4 py-3 ${settings.theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
           <div className="flex items-center w-full">
-            <BackButton/> 
+            <BackButton />
             <input value={serchInput} type="search" placeholder="Search..." className={`${settings.theme === 'dark' ? 'bg-gray-700 text-gray-300' : 'bg-gray-50 text-gray-800'} w-full py-2 border rounded-lg focus:outline-none focus:border-blue-900`} onChange={searchEngine} />
           </div>
           <div className="flex items-center gap-4">
@@ -181,11 +187,11 @@ const Layout = ({ content, settings, userData, setUserData, showHeadder }) => {
               )}
             </button>
           </div>
-        </header> } 
+        </header>}
 
         <main className="flex-1 overflow-auto p-0 min-h-0">
           <div className="w-full">
-            {displayContent}
+            {displayContent} {/* This will now receive the counts */}
           </div>
         </main>
 
